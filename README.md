@@ -1,395 +1,365 @@
-# 🐕 Meet Fiat
+# Fiat
 
-> A tiny Claude Code inspired coding agent that lives in your terminal and has a questionable emotional backstory.
+> A provider‑agnostic, multi‑agent coding assistant that runs directly from your terminal.
 
-I built this as a learning project to understand how coding agents like Claude Code actually work under the hood.
-
-Instead of just reading about tool calling, agent loops, context management and filesystem interaction, I decided to build a small version myself.
-
-It's not Claude Code or Cursor.
-
-It's not trying to replace them.
-
-It's a small-scale coding agent that I built to fuck around with agent architecture and actually understand what is happening.
-
-And yes, it has a mascot.
+Fiat is a Python‑based coding agent designed to work like a lightweight AI‑powered development environment directly in your terminal. It supports multiple LLM providers, interactive provider/model switching, tool‑based repository interaction, live context/token monitoring, and an iterative multi‑agent workflow that can **plan → implement → test → review → fix** code.
 
 ---
 
-## What can it do?
+## ✨ Features
+- 🤖 **Multi‑agent coding workflow** (Planner → Coder → Tester → Reviewer)
+- 🔌 **Multiple LLM providers** (Gemini, OpenAI, Anthropic, OpenRouter, Groq)
+- 🔄 **Runtime provider and model switching** via slash commands
+- 🔁 **Automatic iteration** when tests or review fail
+- 🛠️ **Tool‑based repository interaction** (read, edit, run commands, etc.)
+- 🔐 **Command confirmation and execution safety**
+- 📊 **Interactive `/context` dashboard** with token usage and cost tracking
+- 💬 **Interactive terminal UI** with arrow‑key navigation
+- ⌨️ **Slash‑command autocomplete**
+- 📦 **Installable as a global CLI** (`fiat` command)
+- 🚀 **Works outside the development repository**
+- ⚙️ **Configurable maximum agent iterations** (default 3)
+- 🌊 **Streaming model responses**
+- 💰 **Token usage and estimated cost tracking**
 
-The agent currently has access to the following tools:
+---
 
-| Tool | What it does |
-|---|---|
-| `read_file` | Reads file contents |
-| `list_files` | Lists files and directories |
-| `glob_files` | Finds files using patterns |
-| `grep_search` | Searches through the codebase using regex |
-| `edit_file` | Creates or edits files |
-| `multi_edit` | Performs multiple file edits |
-| `run_command` | Executes terminal commands with user confirmation |
-| `todo_write` | Maintains a task/todo list |
+# 🧠 What is Fiat?
+Fiat is a terminal‑native AI coding agent. Instead of manually switching between an LLM, your editor, shell, tests, and code review, Fiat coordinates these tasks through a single CLI.
 
-So instead of simply asking an LLM:
+A simple request can be handled directly. A complex coding task automatically goes through:
 
 ```text
-"how do I fix this?"
+User Request
+   │
+   ▼
+Orchestrator
+   │
+   ▼
+Planner → Coder → Tester → Reviewer
+   └───────────────┐
+                 │
+               APPROVED
+                 │
+                DONE
 ```
 
-the model can actually inspect the codebase, search for relevant code, make edits, run commands when approved, and keep track of multi-step work.
+This allows Fiat to iteratively improve an implementation instead of stopping after the first generation.
 
 ---
 
-## How it works
+## 🚀 Installation
+### Requirements
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/) (recommended package manager)
 
-At a high level, the architecture is:
+### Install from the repository
+```bash
+# Clone the repo
+git clone https://github.com/sshiv-1/fiat.git
+cd fiat
 
-```text
-User
-  │
-  ▼
-CLI Interface
-  │
-  ▼
-Gemini Chat Session
-  │
-  ├── System Prompt
-  │
-  ├── Tool Definitions
-  │      ├── read_file
-  │      ├── list_files
-  │      ├── glob_files
-  │      ├── grep_search
-  │      ├── edit_file
-  │      ├── multi_edit
-  │      ├── run_command
-  │      └── todo_write
-  │
-  ▼
-Gemini Tool Calling
-  │
-  ▼
-Tool Execution
-  │
-  ▼
-Result returned to model
-  │
-  ▼
-Final response streamed to CLI
+# Install as a global CLI
+uv tool install .
+```
+You can now run the command from **any** directory:
+```bash
+fiat
 ```
 
-The agent uses Google's `genai` Python SDK and creates a persistent chat session with the model and its available tools.
-
-The model can make up to **30 automatic remote tool calls** during a conversation.
+### Development installation
+For development you can run Fiat directly from the source tree:
+```bash
+uv run python -m fiat
+```
+The development launcher (`agent.py`) is still available for quick iteration.
 
 ---
 
-## Technical Details
-
-### Model
-
-The current model configured in the agent is:
-
-```python
-MODEL = "gemini-3.5-flash-lite"
+## 💻 Running Fiat
+```bash
+fiat
 ```
-
-The Gemini client is initialized using the `GEMINI_API_KEY` environment variable or an API key passed through the CLI.
-
-### Core Stack
-
-- **Python**
-- **Google GenAI SDK**
-- **Pydantic**
-- **python-dotenv**
-- **uv** for dependency and environment management
+You will be dropped into an interactive prompt. Example interaction:
+```
+You: Add authentication to this FastAPI application.
+```
+- Simple requests are answered directly.
+- Complex coding tasks invoke the full multi‑agent workflow automatically.
 
 ---
 
-## Agent Architecture
+## 🔌 Supported Providers
+Fiat abstracts providers so the core does not depend on a single LLM.
+Currently supported providers:
+- **Google Gemini**
+- **OpenAI**
+- **Anthropic**
+- **OpenRouter**
+- **Groq**
 
-The main agent is implemented in `agent.py`.
-
-The `AIAgent` class is responsible for:
-
-- Creating the Gemini client
-- Creating the chat session
-- Registering the available tools
-- Maintaining the todo state
-- Streaming model responses
-- Handling tool execution
-
-Tool functions are registered directly with the Gemini generation configuration:
-
-```python
-tools=[
-    self.read_file,
-    self.list_files,
-    self.edit_file,
-    self.multi_edit,
-    self.glob_files,
-    self.grep_search,
-    self.run_command,
-    self.todo_write,
-]
-```
-
-This lets the model decide when a tool is useful instead of requiring a manually coded routing layer.
+The provider layer handles authentication, model selection, streaming, tool/function calling, and token usage metadata. Adding a new provider only requires implementing the common `Provider` interface.
 
 ---
 
-## Tool Implementation
+## 🔄 Provider and Model Switching
+Switch providers or models at runtime using the interactive slash commands:
+- `/provider` – choose a provider
+- `/model` – choose a model
 
-### File Reading
-
-`read_file` reads a file using UTF-8 encoding and returns its contents to the model.
-
-### Directory Listing
-
-`list_files` lists the contents of a requested directory and labels entries as files or directories.
-
-### Glob Search
-
-`glob_files` uses Python's `pathlib` glob functionality to find matching files.
-
-The agent skips directories such as:
-
-```text
-.git
-node_modules
-.venv
-venv
-__pycache__
-.idea
-.mypy_cache
-```
-
-### Code Search
-
-`grep_search` uses Python regular expressions to search through files.
-
-It supports:
-
-- Regex patterns
-- Case-sensitive or case-insensitive search
-- File glob filtering
-- Up to 200 returned matches
-
-### Editing
-
-`edit_file` can either create a new file or replace an existing section of a file.
-
-The editing logic checks that:
-
-- The requested old text exists
-- Ambiguous matches aren't replaced accidentally
-- `replace_all` is explicitly requested when necessary
-
-### Multi-Edit
-
-`multi_edit` applies multiple edits to the same file.
-
-If an edit fails, the operation returns an error before writing the resulting content.
-
-### Command Execution
-
-`run_command` allows the model to request terminal commands, but the user must explicitly approve them:
-
-```text
-Run this command? [y/N]:
-```
-
-Command output is captured and returned to the model.
-
-Output is also truncated at 8000 characters to prevent huge command results from flooding the context.
-
-### Todo Management
-
-`todo_write` maintains an in-memory task list with:
-
-```text
-[ ] pending
-[~] in_progress
-[x] completed
-```
-
-This gives the model a lightweight way to break larger coding tasks into explicit steps.
+Both commands use arrow‑key navigation rather than numeric menus.
 
 ---
 
-## Context & Safety
-
-The agent's system prompt defines how it should behave while working on a codebase.
-
-Some important constraints include:
-
-- Defensive security assistance only
-- Never expose or commit secrets
-- Follow existing project conventions
-- Inspect existing code before modifying it
-- Avoid unnecessary comments
-- Use the available tools instead of pretending to have performed actions
-- Ask for confirmation before executing terminal commands
-
-The project also loads environment variables with `python-dotenv`, keeping API credentials outside the source code.
+## 🔐 Authentication
+Configure or re‑enter API keys with:
+```
+/auth
+```
+Credentials are stored securely under `~/.fiat/`. No external backend is required.
 
 ---
 
-## Project Structure
+## ⌨️ CLI Commands
+| Command | Description |
+|--------|-------------|
+| `/provider` | Change the active LLM provider |
+| `/model` | Change the active model |
+| `/auth` | Configure or re‑enter authentication |
+| `/context` | Open the interactive context and usage dashboard |
+| `/help` | Show available commands |
+| `/exit` | Exit Fiat |
+| `/quit` | Exit Fiat |
 
-```text
-.
-├── agent.py
-├── inventory_tracker.py
-├── test_inventory.py
-├── ascii-art.txt
+Slash‑command recommendations appear while you type, e.g. typing `/mo` displays `/model`.
+
+---
+
+## 📊 Interactive `/context` Dashboard
+Run `/context` to open a full‑screen TUI showing:
+- Provider & model
+- Context window size and usage
+- Token counts (input, output, tool)
+- Estimated cost
+- Session statistics (requests, iterations)
+- Agent status, current role, iteration number
+
+Navigation:
+- `↑/↓` – move between sections
+- `Enter` – expand/collapse a section
+- `Esc` or `q` – close the dashboard
+
+If metadata is unavailable, “Unavailable” is displayed instead of fabricated values.
+
+---
+
+## 🤖 Multi‑Agent Architecture
+Fiat’s multi‑agent system builds on the existing provider, CLI, tool, and UI layers.
+
+### Orchestrator
+Coordinates the workflow, decides whether a request is simple or complex, initializes specialist agents, maintains shared state, enforces iteration limits, and decides when the task is complete.
+
+### Planner
+*Read‑only* specialist that inspects the repository and produces a concrete implementation plan.
+- **Tools:** `read_file`, `list_files`, `glob_files`, `grep_search`
+- **Cannot:** edit files or run commands.
+
+### Coder
+Implements the plan, creates/edits files, runs commands, and responds to feedback.
+- **Tools:** `read_file`, `list_files`, `glob_files`, `grep_search`, `edit_file`, `multi_edit`, `run_command`
+
+### Tester
+Executes tests/validation commands.
+- **Tools:** `run_command`
+- Returns `PASS`, `FAIL`, or `NO_TESTS` with details.
+
+### Reviewer
+Read‑only specialist that checks the final implementation against the plan and requirements.
+- **Tools:** `read_file`, `list_files`, `glob_files`, `grep_search`
+- Returns `APPROVED` or `REJECTED` with findings.
+
+### Iteration Loop
+```
+Planner → Coder → Tester → Reviewer
+   ▲            │            ▼
+   └─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←─←
+```
+- If the Tester fails → back to Coder.
+- If the Reviewer rejects → back to Coder.
+- Loop continues until approval, success, or the **maximum iteration count** is reached.
+
+---
+
+## 🔢 Maximum Agent Iterations
+To avoid endless loops, Fiat stops after a configurable number of iterations (default **3**).
+Configure via environment variable:
+```bash
+export FIAT_MAX_AGENT_ITERATIONS=5
+```
+When the limit is hit Fiat prints a clear warning and returns the partial result.
+
+---
+
+## 🛡️ Safety Model
+Each specialist receives only the tools it needs:
+- **Planner:** READ‑ONLY tools
+- **Coder:** READ, WRITE, EXECUTE tools
+- **Tester:** EXECUTE only (`run_command`)
+- **Reviewer:** READ‑ONLY tools
+
+All commands that modify the system still go through Fiat’s existing **command‑confirmation** prompt, e.g.
+```
+Run this command? [Y/n]:
+```
+No hidden privileged paths exist.
+
+---
+
+## 🧩 Shared Runtime State
+A central `AgentWorkflowState` (exposed via `fiat.state.session_state`) tracks:
+- `provider`, `model`
+- `context_window`, token counters, `estimated_cost`
+- `requests`, `current_role`, `current_iteration`, `max_iterations`
+- `plan`, `test_results`, `review_findings`
+
+The `/context` UI and the orchestration layer read from this single source of truth.
+
+---
+
+## 🏗️ Project Structure
+```
+fiat/
+├── src/
+│   └── fiat/
+│       ├── agents/
+│       │   ├── __init__.py
+│       │   └── orchestrator.py
+│       ├── providers/
+│       │   ├── provider_gemini.py
+│       │   ├── provider_openai.py
+│       │   ├── provider_anthropic.py
+│       │   └── ...
+│       ├── cli.py
+│       ├── config.py
+│       ├── context_ui.py
+│       ├── state.py
+│       ├── ui.py
+│       ├── __init__.py
+│       └── __main__.py
+├── tests/
+│   ├── test_providers.py
+│   └── test_agents.py
+├── README.md
 ├── pyproject.toml
-├── uv.lock
-└── README.md
+└── uv.lock
 ```
-
-Generated/local files such as `.env`, `agent.log`, and `__pycache__/` should remain untracked.
+The layout follows a modern *src* layout and can evolve as new modules are added.
 
 ---
 
-## Setup
+## ⚙️ Architecture Overview
+```
+User → CLI → Orchestrator
+   │                     ├─ Planner (read‑only)
+   │                     ├─ Coder (read/write/exec)
+   │                     ├─ Tester (exec)
+   │                     └─ Reviewer (read‑only)
+   │
+   ▼
+Session State ↔ Context UI
+```
+Providers sit beneath the agents via `ProviderFactory`.
 
-### 1. Clone the repository
+---
 
+## 📦 Packaging
+The package defines a console script entry point:
+```toml
+[project.scripts]
+fiat = "fiat.cli:main"
+```
+Build with:
 ```bash
-git clone <your-repository-url>
-cd <your-repository>
+uv build
 ```
 
-### 2. Install dependencies
+---
 
-This project uses `uv`.
-
+## 🧪 Testing
+Run the full test suite:
 ```bash
+pytest
+```
+Key test coverage areas:
+- Provider behavior and token tracking
+- Orchestrator workflow and iteration limits
+- Tool‑permission enforcement per specialist
+- State updates and UI integration
+
+---
+
+## 🛠️ Development
+```bash
+# Clone and sync dependencies
+git clone https://github.com/sshiv-1/fiat.git
+cd fiat
 uv sync
+
+# Run fiat from source
+uv run python -m fiat
+
+# Run the test suite
+pytest
+
+# Build the distributable
+uv build
 ```
-
-### 3. Configure your API key
-
-Create a `.env` file:
-
-```env
-GEMINI_API_KEY=your_api_key_here
-```
-
-**Do not commit `.env`.**
+Contributions are welcome – see the **Contributing** section below.
 
 ---
 
-## Run the Agent
-
-Start the coding agent with:
-
-```bash
-uv run agent.py
+## 🌍 Why Fiat?
+Typical LLM coding workflows require manual coordination:
 ```
-
-You can also provide the API key directly:
-
-```bash
-uv run agent.py --api-key YOUR_API_KEY
+LLM → Editor → Shell → Tests → LLM → Review
 ```
-
-Once started, the agent loads the ASCII mascot and opens an interactive terminal session.
-
-```text
-You: inspect the project and explain how the inventory system works
-```
-
-The agent can then use its tools to inspect the codebase and respond.
-
-Type:
-
-```text
-exit
-```
-
-or:
-
-```text
-quit
-```
-
-to end the session.
+Fiat consolidates this into a single controlled loop, keeping the developer in the driver’s seat while the agent handles repetitive reasoning and iteration.
 
 ---
 
-## Why I Built This
-
-The goal wasn't to build another production-ready coding assistant.
-
-The goal was to understand the mechanics behind agentic coding systems by actually implementing one.
-
-This project helped me get hands-on with:
-
-- LLM tool calling
-- Agent loops
-- Function calling
-- Context management
-- Filesystem interaction
-- Code search
-- Automated editing
-- Human-in-the-loop command execution
-- Task planning
-- Streaming model responses
-- CLI application architecture
-
-Building even a small version makes the architecture behind tools like Claude Code much less mysterious.
+## 🚧 Current Limitations
+- No parallel specialist execution (sequential only).
+- Provider metadata may vary in granularity.
+- Malformed tool‑call output can abort an iteration.
+- Focused on local terminal use; no web UI or remote backend.
 
 ---
 
-## Current Limitations
-
-This is intentionally a small learning project.
-
-Some current limitations include:
-
-- No persistent conversation memory between runs
-- Todo state is in-memory only
-- No sophisticated codebase indexing
-- No embeddings/vector database
-- No parallel tool execution layer
-- No sophisticated patch/diff system
-- No production-grade sandboxing
-- No web browsing tool
-- No multi-agent architecture
-- No persistent agent state
-
-Those are potential directions for future iterations.
+## 🗺️ Roadmap
+- Parallel task decomposition
+- Better recovery from malformed tool calls
+- Enhanced workflow visualisation
+- Additional provider integrations
+- More sophisticated planning & dependency management
+- Expanded observability and logging
 
 ---
 
-## Future Ideas
-
-Some things I'd like to experiment with next:
-
-- Better context management
-- Smarter codebase indexing
-- Git-aware tooling
-- Diff previews before edits
-- Persistent conversation history
-- More robust command sandboxing
-- Parallel tool execution
-- Sub-agents
-- MCP integration
-- Better terminal UX
-- Streaming tool status
-- Agent evaluation and benchmarking
+## 🤝 Contributing
+We welcome bug reports, feature ideas, and pull requests.
+When contributing, please:
+- Keep provider abstractions intact.
+- Preserve the explicit tool‑permission model.
+- Maintain the command‑confirmation safety flow.
+- Add tests for any new behavior.
+- Document changes in the README and inline docstrings.
 
 ---
 
-## Disclaimer
+## 📄 License
+Add the project's license information here.
 
-This is an educational project inspired by the architecture of modern coding agents.
+---
 
-It is intentionally small, imperfect, and built primarily for learning.
-
-The point isn't to recreate Claude Code.
-
-The point is to understand what makes an agent an agent.
+# ⭐ Fiat
+Give an AI coding agent the tools to **understand**, **build**, **test**, **review**, and **improve** software — while keeping the developer in control.
