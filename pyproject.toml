@@ -3,6 +3,7 @@ name = "fiat-pup"
 version = "0.1.0"
 description = "A provider-agnostic, multi-agent AI coding assistant for the terminal."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
 
 authors = [

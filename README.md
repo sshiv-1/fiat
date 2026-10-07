@@ -357,7 +357,7 @@ When contributing, please:
 ---
 
 ## 📄 License
-Add the project's license information here.
+FIAT is released under the [MIT License](LICENSE). See the [LICENSE](LICENSE) file for details.
 
 ---
 
