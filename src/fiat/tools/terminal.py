@@ -182,18 +182,21 @@ class TerminalExecutor:
                 encoding="utf-8",
                 errors="replace",
                 shell=False,
-                creationflags=(
-                    subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
-                ),
+                creationflags=self._creation_flags(),
             )
             collector = _BoundedOutput(self.output_limit, [], [])
-            readers = self._start_readers(process, collector)
-            timed_out = False
+            readers: list[threading.Thread] = []
             try:
-                process.wait(timeout=request.timeout_seconds)
-            except subprocess.TimeoutExpired:
-                timed_out = True
+                readers = self._start_readers(process, collector)
+                timed_out = False
+                try:
+                    process.wait(timeout=request.timeout_seconds)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    self._terminate_process(process)
+            except KeyboardInterrupt:
                 self._terminate_process(process)
+                raise
             finally:
                 for reader in readers:
                     reader.join(timeout=5)
@@ -216,6 +219,13 @@ class TerminalExecutor:
             )
         except OSError as error:
             return TerminalResult("error", None, "", str(error))
+
+    @staticmethod
+    def _creation_flags() -> int:
+        """Return platform-specific flags for the child process."""
+        if os.name != "nt":
+            return 0
+        return int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
 
     @staticmethod
     def _start_readers(
@@ -284,3 +294,7 @@ class TerminalExecutor:
             process.wait(timeout=2)
         except subprocess.TimeoutExpired:
             process.kill()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                pass
