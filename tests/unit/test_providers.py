@@ -1,3 +1,7 @@
+import os
+import subprocess
+import sys
+
 import pytest
 
 from fiat.provider_factory import ProviderFactory
@@ -8,6 +12,40 @@ def test_provider_factory_preserves_known_provider_adapters():
     assert ProviderFactory.create("OpenAI", "system").name == "OpenAI"
     assert ProviderFactory.create("OpenRouter", "system").name == "OpenRouter"
     assert ProviderFactory.create("unknown", "system") is None
+
+
+@pytest.mark.parametrize(
+    ("provider_name", "expected_module"),
+    [
+        ("Groq", "fiat.provider_openai"),
+        ("OpenRouter", "fiat.provider_openai"),
+        ("Gemini", "fiat.provider_gemini"),
+    ],
+)
+def test_provider_factory_does_not_import_unselected_adapters(
+    provider_name, expected_module
+):
+    script = f"""
+import sys
+from fiat.provider_factory import ProviderFactory
+
+provider = ProviderFactory.create({provider_name!r}, "system")
+assert provider is not None
+assert {expected_module!r} in sys.modules
+assert "fiat.provider_anthropic" not in sys.modules
+if {provider_name!r} != "Gemini":
+    assert "fiat.provider_gemini" not in sys.modules
+"""
+    environment = os.environ.copy()
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=environment,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_openai_provider_configure_uses_mocked_client(monkeypatch):

@@ -1,6 +1,7 @@
 import argparse
 import logging
 import sys
+import time
 from pathlib import Path
 
 import pwinput
@@ -20,6 +21,7 @@ from fiat.config import (
 )
 from fiat.prompt import SYSTEM_PROMPT
 from fiat.provider_factory import ProviderFactory
+from fiat.providers import Provider
 from fiat.repository.repo_map import run_repository_command
 from fiat.tools import (
     FileSystemTools,
@@ -52,7 +54,7 @@ def _as_dict(item) -> dict:
 
 class FiatCore:
     def __init__(self, workspace_root: str | Path | None = None):
-        self.provider = None
+        self.provider: Provider | None = None
         self.todos: list[dict] = []
         self.workspace = WorkspaceManager(workspace_root or Path.cwd())
         self.filesystem = FileSystemTools(self.workspace)
@@ -60,11 +62,29 @@ class FiatCore:
         self.command_history: list[tuple[str, TerminalResult]] = []
         
     def setup_provider(self, config: ProviderConfig, api_key: str):
-        self.provider = ProviderFactory.create(config.provider_name, SYSTEM_PROMPT)
-        if not self.provider:
-            raise ValueError(f"Unknown provider: {config.provider_name}")
-        
-        self.provider.configure(model=config.model_name, api_key=api_key)
+        started_at = time.perf_counter()
+        logging.info("Initializing %s provider.", config.provider_name)
+        try:
+            self.provider = ProviderFactory.create(config.provider_name, SYSTEM_PROMPT)
+            if not self.provider:
+                raise ValueError(f"Unknown provider: {config.provider_name}")
+
+            self.provider.configure(model=config.model_name, api_key=api_key)
+        except KeyboardInterrupt:
+            elapsed = time.perf_counter() - started_at
+            logging.warning(
+                "Provider initialization interrupted after %.2fs (%s).",
+                elapsed,
+                config.provider_name,
+            )
+            raise
+        else:
+            elapsed = time.perf_counter() - started_at
+            logging.info(
+                "Provider %s initialized in %.2fs.",
+                config.provider_name,
+                elapsed,
+            )
         
         self.provider.set_tools([
             self.read_file,
@@ -280,7 +300,11 @@ def main():
         sys.exit(1)
 
     agent = FiatCore()
-    agent.setup_provider(config, api_key)
+    try:
+        agent.setup_provider(config, api_key)
+    except KeyboardInterrupt:
+        print(f"\nStartup interrupted while initializing {config.provider_name}.")
+        return 130
     from fiat.state import session_state, update_context_window
     session_state.provider = config.provider_name
     session_state.model = config.model_name

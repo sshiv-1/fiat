@@ -1,6 +1,6 @@
 [project]
 name = "fiat-pup"
-version = "0.1.0"
+version = "0.2.0"
 description = "A provider-agnostic, multi-agent AI coding assistant for the terminal."
 readme = "README.md"
 license = "MIT"
