@@ -1,8 +1,11 @@
-import json
 import inspect
-from typing import List, Callable, Generator
+import json
+from collections.abc import Callable, Generator
+
 from openai import OpenAI
+
 from fiat.providers import Provider
+
 
 class OpenAIProvider(Provider):
     def __init__(self, system_prompt: str, base_url: str = None, provider_name: str = "OpenAI"):
@@ -28,15 +31,19 @@ class OpenAIProvider(Provider):
             kwargs["base_url"] = self.base_url
         self.client = OpenAI(**kwargs)
 
-    def set_tools(self, tools: List[Callable]):
+    def set_tools(self, tools: list[Callable]):
         self.tools = tools
         self._tool_map = {t.__name__: t for t in tools}
 
     def _type_map(self, py_type):
-        if py_type == int: return "integer"
-        if py_type == float: return "number"
-        if py_type == bool: return "boolean"
-        if py_type == list or getattr(py_type, "__origin__", None) == list: return "array"
+        if py_type is int:
+            return "integer"
+        if py_type is float:
+            return "number"
+        if py_type is bool:
+            return "boolean"
+        if py_type is list or getattr(py_type, "__origin__", None) is list:
+            return "array"
         return "string"
 
     def _get_openai_tools(self):

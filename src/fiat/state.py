@@ -1,17 +1,17 @@
 from dataclasses import dataclass
-from typing import Optional
+
 
 @dataclass
 class SessionState:
     provider: str = "Unknown"
     model: str = "Unknown"
-    context_window: Optional[int] = None
+    context_window: int | None = None
     input_tokens: int = 0
     output_tokens: int = 0
     tool_tokens: int = 0
     total_tokens: int = 0
     requests: int = 0
-    estimated_cost: Optional[float] = None
+    estimated_cost: float | None = None
     
     agent_status: str = "Idle"
     current_role: str = "—"

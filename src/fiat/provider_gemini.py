@@ -1,9 +1,10 @@
-import logging
-from typing import List, Callable, Generator
+from collections.abc import Callable, Generator
+
 from google import genai
 from google.genai import types
+
 from fiat.providers import Provider
-import os
+
 
 class GeminiProvider(Provider):
     def __init__(self, system_prompt: str):
@@ -33,7 +34,7 @@ class GeminiProvider(Provider):
         )
         self._init_chat()
 
-    def set_tools(self, tools: List[Callable]):
+    def set_tools(self, tools: list[Callable]):
         self.tools = tools
         if self.client:
             self._init_chat()

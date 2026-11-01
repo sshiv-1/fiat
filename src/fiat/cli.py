@@ -1,23 +1,33 @@
-import os
-import re
-import sys
 import argparse
 import logging
-import subprocess
-import pwinput
+import sys
 from pathlib import Path
-from typing import List
 
-from pydantic import BaseModel
+import pwinput
 from dotenv import load_dotenv
-
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
+from pydantic import BaseModel
 
-from fiat.ui import interactive_select
+from fiat.config import (
+    CONFIG_DIR,
+    AuthConfig,
+    ProviderConfig,
+    get_credential,
+    load_config,
+    save_config,
+    save_credential,
+)
 from fiat.prompt import SYSTEM_PROMPT
-from fiat.config import load_config, save_config, ProviderConfig, AuthConfig, get_credential, save_credential, CONFIG_DIR
 from fiat.provider_factory import ProviderFactory
+from fiat.repository.repo_map import run_repository_command
+from fiat.tools import (
+    FileSystemTools,
+    TerminalExecutor,
+    TerminalResult,
+    WorkspaceManager,
+)
+from fiat.ui import interactive_select
 
 load_dotenv()
 
@@ -27,8 +37,6 @@ logging.basicConfig(
     format="%(asctime)s - %(message)s",
     handlers=[logging.FileHandler(CONFIG_DIR / "agent.log")],
 )
-
-SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".idea", ".mypy_cache"}
 
 class Todo(BaseModel):
     content: str
@@ -43,9 +51,13 @@ def _as_dict(item) -> dict:
     return item if isinstance(item, dict) else item.model_dump()
 
 class FiatCore:
-    def __init__(self):
+    def __init__(self, workspace_root: str | Path | None = None):
         self.provider = None
-        self.todos: List[dict] = []
+        self.todos: list[dict] = []
+        self.workspace = WorkspaceManager(workspace_root or Path.cwd())
+        self.filesystem = FileSystemTools(self.workspace)
+        self.terminal = TerminalExecutor(self.workspace)
+        self.command_history: list[tuple[str, TerminalResult]] = []
         
     def setup_provider(self, config: ProviderConfig, api_key: str):
         self.provider = ProviderFactory.create(config.provider_name, SYSTEM_PROMPT)
@@ -70,148 +82,45 @@ class FiatCore:
         logging.info(f"{name}: {detail}")
         print(f"\n  [tool] {name} {detail}".rstrip(), flush=True)
 
-    @staticmethod
-    def _apply_edit(content: str, old: str, new: str, replace_all: bool) -> str:
-        if not old:
-            raise ValueError("old_text is empty")
-        count = content.count(old)
-        if count == 0:
-            raise ValueError(f"text not found: {old[:80]!r}")
-        if count > 1 and not replace_all:
-            raise ValueError(
-                f"text appears {count} times (add more context or set replace_all): {old[:80]!r}"
-            )
-        return content.replace(old, new) if replace_all else content.replace(old, new, 1)
-
     def read_file(self, path: str) -> str:
         self._log_tool("read_file", path)
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return f"File contents of {path}:\n{f.read()}"
-        except FileNotFoundError:
-            return f"File not found: {path}"
-        except Exception as e:
-            return f"Error reading file: {e}"
+        return self.filesystem.read_file(path)
 
     def list_files(self, path: str = ".") -> str:
         self._log_tool("list_files", path)
-        try:
-            if not os.path.exists(path):
-                return f"Path not found: {path}"
-            items = []
-            for item in sorted(os.listdir(path)):
-                if os.path.isdir(os.path.join(path, item)):
-                    items.append(f"[DIR]  {item}/")
-                else:
-                    items.append(f"[FILE] {item}")
-            if not items:
-                return f"Empty directory: {path}"
-            return f"Contents of {path}:\n" + "\n".join(items)
-        except Exception as e:
-            return f"Error listing files: {e}"
+        return self.filesystem.list_files(path)
 
     def edit_file(self, path: str, new_text: str, old_text: str = "", replace_all: bool = False) -> str:
         self._log_tool("edit_file", path)
-        try:
-            if old_text and os.path.exists(path):
-                with open(path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                content = self._apply_edit(content, old_text, new_text, replace_all)
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(content)
-                return f"Successfully edited {path}"
+        return self.filesystem.edit_file(path, new_text, old_text, replace_all)
 
-            dir_name = os.path.dirname(path)
-            if dir_name:
-                os.makedirs(dir_name, exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(new_text)
-            return f"Successfully created {path}"
-        except Exception as e:
-            return f"Error editing file: {e}"
-
-    def multi_edit(self, path: str, edits: List[Edit]) -> str:
+    def multi_edit(self, path: str, edits: list[Edit]) -> str:
         self._log_tool("multi_edit", f"{path} ({len(edits)} edits)")
-        try:
-            if not os.path.exists(path):
-                return f"File not found: {path}"
-            with open(path, "r", encoding="utf-8") as f:
-                content = f.read()
-
-            for i, raw in enumerate(edits, start=1):
-                e = _as_dict(raw)
-                try:
-                    content = self._apply_edit(
-                        content, e["old_text"], e["new_text"], e.get("replace_all", False)
-                    )
-                except ValueError as err:
-                    return f"Edit {i} failed, no changes written: {err}"
-
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(content)
-            return f"Successfully applied {len(edits)} edits to {path}"
-        except Exception as e:
-            return f"Error in multi_edit: {e}"
+        return self.filesystem.multi_edit(path, edits)
 
     def glob_files(self, pattern: str, path: str = ".") -> str:
         self._log_tool("glob_files", f"{pattern} in {path}")
-        try:
-            matches = [
-                p for p in Path(path).glob(pattern)
-                if p.is_file() and not (set(p.parts) & SKIP_DIRS)
-            ]
-            matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-            if not matches:
-                return f"No files matched {pattern}"
-            return "\n".join(str(p) for p in matches[:200])
-        except Exception as e:
-            return f"Error in glob_files: {e}"
+        return self.filesystem.glob_files(pattern, path)
 
     def grep_search(self, pattern: str, path: str = ".", file_glob: str = "*", ignore_case: bool = False) -> str:
         self._log_tool("grep_search", f"{pattern!r} in {path}")
-        try:
-            regex = re.compile(pattern, re.IGNORECASE if ignore_case else 0)
-        except re.error as e:
-            return f"Invalid regex: {e}"
-
-        root = Path(path)
-        files = [root] if root.is_file() else [
-            p for p in root.rglob(file_glob)
-            if p.is_file() and not (set(p.parts) & SKIP_DIRS)
-        ]
-
-        results = []
-        for fp in files:
-            try:
-                with open(fp, "r", encoding="utf-8") as f:
-                    for lineno, line in enumerate(f, start=1):
-                        if regex.search(line):
-                            results.append(f"{fp}:{lineno}:{line.rstrip()[:200]}")
-                            if len(results) >= 200:
-                                return "\n".join(results) + "\n(truncated at 200 matches)"
-            except (UnicodeDecodeError, OSError):
-                continue
-        return "\n".join(results) if results else f"No matches for {pattern!r}"
+        return self.filesystem.grep_search(pattern, path, file_glob, ignore_case)
 
     def run_command(self, command: str, timeout_seconds: int = 60) -> str:
-        self._log_tool("run_command", command)
-        answer = input(f"\n  Run this command? [y/N]: {command}\n  > ").strip().lower()
-        if answer not in ("y", "yes"):
-            return "User declined to run the command."
-        try:
-            proc = subprocess.run(
-                command, shell=True, capture_output=True, text=True, timeout=timeout_seconds
-            )
-            out = (proc.stdout or "") + (proc.stderr or "")
-            if len(out) > 8000:
-                out = out[:8000] + "\n...(output truncated)"
-            return f"Exit code {proc.returncode}\n{out}"
-        except subprocess.TimeoutExpired:
-            return f"Command timed out after {timeout_seconds}s"
-        except Exception as e:
-            return f"Error running command: {e}"
+        self._log_tool("run_command", "request received")
 
-    def todo_write(self, todos: List[Todo]) -> str:
+        def approve(request):
+            rendered = " ".join(request.args)
+            answer = input(f"\n  Approve command? [y/N]: {rendered}\n  > ").strip().lower()
+            return answer in ("y", "yes")
+
+        result = self.terminal.execute(command, timeout_seconds, approve)
+        from fiat.state import session_state
+
+        self.command_history.append((session_state.current_role, result))
+        return result.format()
+
+    def todo_write(self, todos: list[Todo]) -> str:
         self.todos = [_as_dict(t) for t in todos]
         self._log_tool("todo_write", f"({len(self.todos)} items)")
         icons = {"pending": "[ ]", "in_progress": "[~]", "completed": "[x]"}
@@ -224,8 +133,7 @@ class FiatCore:
         from fiat.agents.orchestrator import Orchestrator
         orchestrator = Orchestrator(self)
         try:
-            for chunk in orchestrator.run(user_input):
-                yield chunk
+            yield from orchestrator.run(user_input)
         except Exception as e:
             yield f"\nError: {e}"
 
@@ -246,6 +154,22 @@ COMMANDS = [
     {
         "name": "/context",
         "description": "Show interactive context and usage dashboard.",
+    },
+    {
+        "name": "/index",
+        "description": "Scan the workspace and save safe index metadata.",
+    },
+    {
+        "name": "/map",
+        "description": "Show the current repository map.",
+    },
+    {
+        "name": "/search",
+        "description": "Search indexed repository text with a regex query.",
+    },
+    {
+        "name": "/symbol",
+        "description": "Find indexed symbols by name.",
     },
     {
         "name": "/help",
@@ -328,7 +252,22 @@ def run_first_time_setup() -> ProviderConfig:
 def main():
     parser = argparse.ArgumentParser(description="AI Code Assistant (Fiat)")
     parser.add_argument("--api-key", help="Fallback API key if not configured")
+    parser.add_argument("--workspace", default=".", help="Workspace for repository commands")
+    parser.add_argument("repository_command", nargs="?", help="/index, /map, /search, or /symbol")
+    parser.add_argument("repository_query", nargs="*", help="Arguments for a repository command")
     args = parser.parse_args()
+
+    if args.repository_command:
+        repository_commands = {"/index", "/map", "/search", "/symbol"}
+        command = args.repository_command.casefold()
+        if command not in repository_commands:
+            parser.error(f"Unknown command: {args.repository_command}")
+        try:
+            workspace = WorkspaceManager(args.workspace)
+            print(run_repository_command(command, args.repository_query, workspace))
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
+        return
 
     config = load_config()
     if not config:
@@ -371,6 +310,8 @@ def main():
                 continue
                 
             lower_input = user_input.lower()
+            command_name, _, command_arguments = user_input.partition(" ")
+            repository_commands = {"/index", "/map", "/search", "/symbol"}
             
             if lower_input == "/":
                 print("\nCommands:")
@@ -379,6 +320,18 @@ def main():
                 print()
                 continue
                 
+            if command_name.casefold() in repository_commands:
+                print(
+                    "\n"
+                    + run_repository_command(
+                        command_name.casefold(),
+                        command_arguments.split() if command_arguments else [],
+                        agent.workspace,
+                    )
+                    + "\n"
+                )
+                continue
+
             if lower_input.startswith("/") and lower_input not in [c["name"] for c in COMMANDS]:
                 print(f"\nUnknown command: {lower_input}. Type /help for available commands.\n")
                 continue

@@ -1,12 +1,13 @@
-from typing import Optional
-from fiat.providers import Provider
+
+from fiat.provider_anthropic import AnthropicProvider
 from fiat.provider_gemini import GeminiProvider
 from fiat.provider_openai import OpenAIProvider
-from fiat.provider_anthropic import AnthropicProvider
+from fiat.providers import Provider
+
 
 class ProviderFactory:
     @staticmethod
-    def create(provider_name: str, system_prompt: str) -> Optional[Provider]:
+    def create(provider_name: str, system_prompt: str) -> Provider | None:
         name_lower = provider_name.lower()
         if name_lower == "gemini":
             return GeminiProvider(system_prompt=system_prompt)

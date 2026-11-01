@@ -3,9 +3,9 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout.containers import Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.layout import Layout
-from prompt_toolkit.formatted_text import HTML
 
 from fiat.state import session_state
+
 
 def format_tokens(t):
     if t is None:

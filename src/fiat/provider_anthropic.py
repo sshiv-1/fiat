@@ -1,8 +1,11 @@
-import json
 import inspect
-from typing import List, Callable, Generator
+import json
+from collections.abc import Callable, Generator
+
 from anthropic import Anthropic
+
 from fiat.providers import Provider
+
 
 class AnthropicProvider(Provider):
     def __init__(self, system_prompt: str):
@@ -23,15 +26,19 @@ class AnthropicProvider(Provider):
         self.api_key = api_key
         self.client = Anthropic(api_key=api_key)
 
-    def set_tools(self, tools: List[Callable]):
+    def set_tools(self, tools: list[Callable]):
         self.tools = tools
         self._tool_map = {t.__name__: t for t in tools}
 
     def _type_map(self, py_type):
-        if py_type == int: return "integer"
-        if py_type == float: return "number"
-        if py_type == bool: return "boolean"
-        if py_type == list or getattr(py_type, "__origin__", None) == list: return "array"
+        if py_type is int:
+            return "integer"
+        if py_type is float:
+            return "number"
+        if py_type is bool:
+            return "boolean"
+        if py_type is list or getattr(py_type, "__origin__", None) is list:
+            return "array"
         return "string"
 
     def _get_anthropic_tools(self):
