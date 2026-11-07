@@ -1,7 +1,8 @@
-import questionary
-from typing import List, Optional
 
-def interactive_select(title: str, options: List[str]) -> Optional[str]:
+import questionary
+
+
+def interactive_select(title: str, options: list[str]) -> str | None:
     if not options:
         return None
     

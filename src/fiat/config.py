@@ -1,8 +1,8 @@
-import os
 import json
-from pathlib import Path
+import os
 from dataclasses import dataclass
-from typing import Optional
+from pathlib import Path
+
 import keyring
 
 CONFIG_DIR = Path.home() / ".fiat"
@@ -25,7 +25,7 @@ def get_keyring_key(provider_name: str) -> str:
 def save_credential(provider_name: str, secret: str):
     keyring.set_password(APP_NAME, get_keyring_key(provider_name), secret)
 
-def get_credential(provider_name: str) -> Optional[str]:
+def get_credential(provider_name: str) -> str | None:
     env_var = f"{provider_name.upper()}_API_KEY"
     if os.environ.get(env_var):
         return os.environ.get(env_var)
@@ -34,11 +34,11 @@ def get_credential(provider_name: str) -> Optional[str]:
     except Exception:
         return None
 
-def load_config() -> Optional[ProviderConfig]:
+def load_config() -> ProviderConfig | None:
     if not CONFIG_FILE.exists():
         return None
     try:
-        with open(CONFIG_FILE, "r") as f:
+        with open(CONFIG_FILE) as f:
             data = json.load(f)
         return ProviderConfig(
             provider_name=data.get("provider_name"),

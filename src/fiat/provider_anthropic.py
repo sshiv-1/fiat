@@ -1,40 +1,48 @@
-import json
 import inspect
-from typing import List, Callable, Generator
+import json
+from collections.abc import Callable, Generator
+from typing import Any
+
 from anthropic import Anthropic
+
 from fiat.providers import Provider
 
+
 class AnthropicProvider(Provider):
-    def __init__(self, system_prompt: str):
+    def __init__(self, system_prompt: str) -> None:
         self.system_prompt = system_prompt
-        self.client = None
-        self.tools = []
+        self.client: Any | None = None
+        self.tools: list[Callable[..., Any]] = []
         self.model = "claude-3-5-sonnet-20240620"
-        self.api_key = None
-        self.messages = []
-        self._tool_map = {}
+        self.api_key: str | None = None
+        self.messages: list[dict[str, Any]] = []
+        self._tool_map: dict[str, Callable[..., Any]] = {}
 
     @property
     def name(self) -> str:
         return "Anthropic"
 
-    def configure(self, model: str, api_key: str):
+    def configure(self, model: str, api_key: str) -> None:
         self.model = model
         self.api_key = api_key
         self.client = Anthropic(api_key=api_key)
 
-    def set_tools(self, tools: List[Callable]):
+    def set_tools(self, tools: list[Callable[..., Any]]) -> None:
         self.tools = tools
         self._tool_map = {t.__name__: t for t in tools}
 
-    def _type_map(self, py_type):
-        if py_type == int: return "integer"
-        if py_type == float: return "number"
-        if py_type == bool: return "boolean"
-        if py_type == list or getattr(py_type, "__origin__", None) == list: return "array"
+    def _type_map(self, py_type: Any) -> str:
+        if py_type is int:
+            return "integer"
+        if py_type is float:
+            return "number"
+        if py_type is bool:
+            return "boolean"
+        if py_type is list or getattr(py_type, "__origin__", None) is list:
+            return "array"
         return "string"
 
-    def _get_anthropic_tools(self):
+    def _get_anthropic_tools(self) -> list[dict[str, Any]] | None:
         if not self.tools:
             return None
         tools = []

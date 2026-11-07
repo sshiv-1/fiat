@@ -1,45 +1,58 @@
-import json
 import inspect
-from typing import List, Callable, Generator
+import json
+from collections.abc import Callable, Generator
+from typing import Any
+
 from openai import OpenAI
+
 from fiat.providers import Provider
 
+
 class OpenAIProvider(Provider):
-    def __init__(self, system_prompt: str, base_url: str = None, provider_name: str = "OpenAI"):
+    def __init__(
+        self,
+        system_prompt: str,
+        base_url: str | None = None,
+        provider_name: str = "OpenAI",
+    ) -> None:
         self.system_prompt = system_prompt
-        self.client = None
-        self.tools = []
+        self.client: Any | None = None
+        self.tools: list[Callable[..., Any]] = []
         self.model = "gpt-4o"
-        self.api_key = None
-        self.messages = [{"role": "system", "content": self.system_prompt}]
+        self.api_key: str | None = None
+        self.messages: list[dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
         self.base_url = base_url
         self._provider_name = provider_name
-        self._tool_map = {}
+        self._tool_map: dict[str, Callable[..., Any]] = {}
 
     @property
     def name(self) -> str:
         return self._provider_name
 
-    def configure(self, model: str, api_key: str):
+    def configure(self, model: str, api_key: str) -> None:
         self.model = model
         self.api_key = api_key
-        kwargs = {"api_key": api_key}
+        kwargs: dict[str, Any] = {"api_key": api_key}
         if self.base_url:
             kwargs["base_url"] = self.base_url
         self.client = OpenAI(**kwargs)
 
-    def set_tools(self, tools: List[Callable]):
+    def set_tools(self, tools: list[Callable[..., Any]]) -> None:
         self.tools = tools
         self._tool_map = {t.__name__: t for t in tools}
 
-    def _type_map(self, py_type):
-        if py_type == int: return "integer"
-        if py_type == float: return "number"
-        if py_type == bool: return "boolean"
-        if py_type == list or getattr(py_type, "__origin__", None) == list: return "array"
+    def _type_map(self, py_type: Any) -> str:
+        if py_type is int:
+            return "integer"
+        if py_type is float:
+            return "number"
+        if py_type is bool:
+            return "boolean"
+        if py_type is list or getattr(py_type, "__origin__", None) is list:
+            return "array"
         return "string"
 
-    def _get_openai_tools(self):
+    def _get_openai_tools(self) -> list[dict[str, Any]] | None:
         if not self.tools:
             return None
         tools = []

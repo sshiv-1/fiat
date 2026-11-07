@@ -19,3 +19,7 @@ build/
 
 # Logs
 *.log
+
+# Fiat repository intelligence artifacts
+.agent/
+.fiat/

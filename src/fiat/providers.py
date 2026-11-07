@@ -1,8 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import List, Callable, Generator, Dict, Any
-import os
-import json
-import logging
+from collections.abc import Callable, Generator
+
 
 class Provider(ABC):
     @property
@@ -15,7 +13,7 @@ class Provider(ABC):
         pass
 
     @abstractmethod
-    def set_tools(self, tools: List[Callable]):
+    def set_tools(self, tools: list[Callable]):
         pass
 
     @abstractmethod

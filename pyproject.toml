@@ -1,6 +1,6 @@
 [project]
 name = "fiat-pup"
-version = "0.1.0"
+version = "0.2.0"
 description = "A provider-agnostic, multi-agent AI coding assistant for the terminal."
 readme = "README.md"
 license = "MIT"
@@ -62,4 +62,32 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/fiat"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
 
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = ["anthropic", "google.*", "groq", "keyring", "openai", "pwinput", "questionary"]
+ignore_missing_imports = true
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pytest>=8.0",
+    "ruff>=0.8",
+]

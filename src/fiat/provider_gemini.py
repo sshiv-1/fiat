@@ -1,24 +1,26 @@
-import logging
-from typing import List, Callable, Generator
+from collections.abc import Callable, Generator
+from typing import Any, cast
+
 from google import genai
 from google.genai import types
+
 from fiat.providers import Provider
-import os
+
 
 class GeminiProvider(Provider):
-    def __init__(self, system_prompt: str):
+    def __init__(self, system_prompt: str) -> None:
         self.system_prompt = system_prompt
-        self.client = None
-        self.chat_session = None
-        self.tools = []
+        self.client: Any | None = None
+        self.chat_session: Any | None = None
+        self.tools: list[Callable[..., Any]] = []
         self.model = "gemini-3.5-flash-lite"
-        self.api_key = None
+        self.api_key: str | None = None
 
     @property
     def name(self) -> str:
         return "Gemini"
 
-    def configure(self, model: str, api_key: str):
+    def configure(self, model: str, api_key: str) -> None:
         self.model = model
         self.api_key = api_key
         self.client = genai.Client(
@@ -33,19 +35,19 @@ class GeminiProvider(Provider):
         )
         self._init_chat()
 
-    def set_tools(self, tools: List[Callable]):
+    def set_tools(self, tools: list[Callable[..., Any]]) -> None:
         self.tools = tools
         if self.client:
             self._init_chat()
 
-    def _init_chat(self):
+    def _init_chat(self) -> None:
         if not self.client:
             return
         self.chat_session = self.client.chats.create(
             model=self.model,
             config=types.GenerateContentConfig(
                 system_instruction=self.system_prompt,
-                tools=self.tools if self.tools else None,
+                tools=cast(Any, self.tools) if self.tools else None,
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(
                     maximum_remote_calls=30
                 ) if self.tools else None,
