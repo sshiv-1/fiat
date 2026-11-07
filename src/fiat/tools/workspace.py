@@ -71,6 +71,8 @@ class WorkspaceManager:
     def is_sensitive(relative_path: Path) -> bool:
         """Return whether a workspace-relative path commonly holds a secret."""
         parts = tuple(part.lower() for part in relative_path.parts)
+        if parts and parts[0] == ".fiat":
+            return True
         if any(part in {".ssh", ".aws", ".gnupg"} for part in parts):
             return True
         name = relative_path.name.lower()

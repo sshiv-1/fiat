@@ -41,6 +41,9 @@ def test_path_traversal_and_sensitive_files_are_rejected(tmp_path):
     assert "protected file" in tools.edit_file(".env", "x")
     (tmp_path / "credential.json").write_text('{"token": "secret"}')
     assert "protected file" in tools.read_file("credential.json")
+    (tmp_path / ".fiat").mkdir()
+    (tmp_path / ".fiat" / "permissions.json").write_text("{}")
+    assert "protected file" in tools.edit_file(".fiat/permissions.json", "{}")
 
 
 def test_glob_and_search_return_workspace_relative_results(tmp_path):

@@ -17,6 +17,7 @@ class SessionState:
     current_role: str = "—"
     current_iteration: int = 0
     max_iterations: int = 0
+    interaction_mode: str = "WORK"
 
 session_state = SessionState()
 

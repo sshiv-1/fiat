@@ -146,10 +146,12 @@ class TerminalExecutor:
         workspace: WorkspaceManager,
         policy: CommandPolicy | None = None,
         output_limit: int = 8_000,
+        authorization_callback: Callable[[CommandRequest], bool] | None = None,
     ) -> None:
         self.workspace = workspace
         self.policy = policy or CommandPolicy()
         self.output_limit = output_limit
+        self.authorization_callback = authorization_callback
 
     def execute(
         self,
@@ -164,7 +166,8 @@ class TerminalExecutor:
             return TerminalResult("blocked", None, "", str(error))
 
         if self.policy.requires_approval(request):
-            approved = approval_callback(request) if approval_callback else False
+            callback = approval_callback or self.authorization_callback
+            approved = callback(request) if callback else False
             if not approved:
                 return TerminalResult("cancelled", None, "", "Approval was not granted.")
 

@@ -309,6 +309,100 @@ symlink escapes, and common credential files. Commands run without a shell,
 have time/output limits, and require explicit approval unless classified
 read-only. See [SECURITY.md](SECURITY.md) for the remaining limitations.
 
+## Phase 2: structured Plan Mode and permissions
+
+Fiat now has two interaction modes. The active mode is visible in the prompt,
+and **Shift+Tab** toggles it immediately without restarting Fiat or clearing
+the current conversation. Prompt-toolkit maps the common Windows and Linux
+BackTab sequences; if a terminal does not expose Shift+Tab, use the command
+fallback instead.
+
+```text
+/mode
+/mode plan
+/mode work
+```
+
+**Plan Mode** turns a coding request into a dependency-aware implementation
+plan. It builds bounded repository context through the existing repository
+intelligence, gives the model only read-only tools, validates the returned
+Pydantic data, and displays every task before asking for a decision. It never
+edits a source file, runs a command, installs a dependency, or begins plan
+execution. The only Plan Mode writes are Fiat's own local plan metadata under
+`.fiat/`, which is ignored by Git.
+
+Each persisted plan includes a stable plan ID, schema version, timestamps,
+revision number, lifecycle state, and typed tasks. Tasks have stable IDs,
+dependencies, target files, and measurable acceptance criteria. Fiat rejects
+duplicate IDs, missing/self dependencies, cycles, empty tasks, unsupported
+schemas, and invalid lifecycle transitions. Valid tasks are displayed in a
+deterministic topological order.
+
+```text
+Plan > Add JWT authentication
+IMPLEMENTATION PLAN
+Plan: Add JWT authentication
+ID: plan_...
+Status: AWAITING_APPROVAL
+
+TASK 01 [task_schemas] — Define authentication schemas
+Dependencies: None
+Targets: src/auth/schemas.py
+Acceptance criteria:
+  - Token request and response schemas validate valid and invalid input.
+
+[A] Approve  [R] Revise  [D] Reject  [C] Cancel
+```
+
+Plan controls are available in either mode:
+
+```text
+/plan
+/plan list
+/plan show <id>
+/plan approve <id>
+/plan reject <id>
+/plan revise <id>
+/plan cancel <id>
+```
+
+`/plan revise <id>` invalidates an existing approval and marks the plan for a
+new Plan Mode request. The refreshed plan retains its ID, increments its
+revision, must validate again, and needs new explicit approval. Approval only
+marks a plan ready for a future executor; it never performs work. `/plan
+execute <id>` validates that state and honestly reports that structured
+multi-task execution remains a Phase 3 capability.
+
+### Permission architecture
+
+Work Mode keeps Fiat's existing agent workflow, but its exposed file-edit and
+non-read-only command boundaries now use one centralized permission manager.
+The manager receives the exact operation, command arguments or target path,
+working directory, reason, risk level, and operation category before the tool
+runs. It supports:
+
+1. Allow once.
+2. Allow this exact operation for the current session.
+3. Allow this exact non-destructive operation for this workspace.
+4. Deny.
+
+Workspace grants are exact fingerprints, including command arguments and
+target resource; there are no wildcard, global-shell, or unrestricted
+workspace grants. Destructive commands always require a new one-time decision.
+Git pushes also require explicit approval each time. Permissions and audit
+events live separately from plans in `.fiat/permissions.json` and
+`.fiat/permission-audit.json`; session grants remain in memory only.
+
+Approval is deliberately not a sandbox escape hatch. Fiat still validates
+workspace containment, symlink escapes, protected files, command parsing,
+shell-free execution, time/output limits, and environment protection after a
+user grants permission. If prompting, grant loading, or authorization fails,
+the sensitive operation is denied.
+
+Phase 2 does not add an autonomous plan executor. Work Mode can still use the
+existing Phase 1 implementation workflow with permissions, while approved
+structured plans are durable handoff artifacts for Phase 3.
+
 ---
 
 ## 📦 Packaging

@@ -1,3 +1,5 @@
+from typing import Any, TypedDict
+
 from prompt_toolkit.application import Application
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout.containers import Window
@@ -7,7 +9,12 @@ from prompt_toolkit.layout.layout import Layout
 from fiat.state import session_state
 
 
-def format_tokens(t):
+class DashboardState(TypedDict):
+    selected: int
+    expanded: dict[int, bool]
+
+
+def format_tokens(t: int | None) -> str:
     if t is None:
         return "Unavailable"
     if t >= 1000000:
@@ -16,11 +23,11 @@ def format_tokens(t):
         return f"{t/1000:.1f}K"
     return str(t)
 
-def show_context_ui():
+def show_context_ui() -> None:
     bindings = KeyBindings()
     
     # State for UI
-    ui_state = {
+    ui_state: DashboardState = {
         "selected": 0,
         "expanded": {0: True, 1: True, 2: True} # 3 sections
     }
@@ -28,25 +35,25 @@ def show_context_ui():
     sections = ["Estimated usage", "Session", "Agent"]
     
     @bindings.add('up')
-    def _(event):
+    def _(event: Any) -> None:
         ui_state["selected"] = max(0, ui_state["selected"] - 1)
         
     @bindings.add('down')
-    def _(event):
+    def _(event: Any) -> None:
         ui_state["selected"] = min(len(sections) - 1, ui_state["selected"] + 1)
         
     @bindings.add('enter')
-    def _(event):
+    def _(event: Any) -> None:
         sel = ui_state["selected"]
         ui_state["expanded"][sel] = not ui_state["expanded"][sel]
 
     @bindings.add('escape')
     @bindings.add('q')
     @bindings.add('c-c')
-    def _(event):
+    def _(event: Any) -> None:
         event.app.exit()
 
-    def get_dashboard_text():
+    def get_dashboard_text() -> str:
         cw = session_state.context_window
         used = session_state.total_tokens
         
@@ -131,7 +138,7 @@ def show_context_ui():
         ])
         return "\n".join(lines)
 
-    app = Application(
+    app: Application[None] = Application(
         layout=Layout(Window(FormattedTextControl(get_dashboard_text))),
         key_bindings=bindings,
         full_screen=True,

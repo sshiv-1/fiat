@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -15,8 +15,13 @@ from fiat.tools.workspace import WorkspaceError, WorkspaceManager
 class FileSystemTools:
     """Read and edit files without permitting workspace escapes."""
 
-    def __init__(self, workspace: WorkspaceManager) -> None:
+    def __init__(
+        self,
+        workspace: WorkspaceManager,
+        authorization_callback: Callable[[str, str, str], bool] | None = None,
+    ) -> None:
         self.workspace = workspace
+        self.authorization_callback = authorization_callback
 
     @staticmethod
     def _apply_edit(content: str, old: str, new: str, replace_all: bool) -> str:
@@ -107,6 +112,9 @@ class FileSystemTools:
         """Create a new file or apply a verified replacement atomically."""
         try:
             target = self.workspace.validate_path(path, operation="write")
+            operation = "edit" if target.exists() else "create"
+            if not self._authorize(target, operation):
+                return "Filesystem error: Permission denied for file modification."
             if target.exists():
                 if not target.is_file():
                     return f"Path is not a file: {path}"
@@ -132,6 +140,8 @@ class FileSystemTools:
         """Apply all replacements to a single file, writing only if all succeed."""
         try:
             target = self.workspace.validate_path(path, operation="write")
+            if not self._authorize(target, "edit"):
+                return "Filesystem error: Permission denied for file modification."
             if not target.exists():
                 return f"File not found: {path}"
             if not target.is_file():
@@ -165,6 +175,16 @@ class FileSystemTools:
             "new_text": edit.new_text,
             "replace_all": getattr(edit, "replace_all", False),
         }
+
+    def _authorize(self, target: Path, operation: str) -> bool:
+        if self.authorization_callback is None:
+            return True
+        relative = target.relative_to(self.workspace.root).as_posix()
+        return self.authorization_callback(
+            relative,
+            operation,
+            f"{operation.capitalize()} workspace file {relative}.",
+        )
 
     def glob_files(self, pattern: str, path: str = ".") -> str:
         """Return safe file paths matching a workspace-relative glob."""

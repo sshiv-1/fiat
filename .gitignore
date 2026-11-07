@@ -22,3 +22,4 @@ build/
 
 # Fiat repository intelligence artifacts
 .agent/
+.fiat/

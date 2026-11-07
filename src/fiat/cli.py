@@ -2,6 +2,7 @@ import argparse
 import logging
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pwinput
@@ -19,6 +20,17 @@ from fiat.config import (
     save_config,
     save_credential,
 )
+from fiat.modes import InteractionMode, ModeController, build_mode_key_bindings
+from fiat.permissions import (
+    PermissionDecision,
+    PermissionManager,
+    PermissionRequest,
+)
+from fiat.planning.generator import StructuredPlanGenerator
+from fiat.planning.models import Plan, PlanLifecycle
+from fiat.planning.rendering import render_plan, render_plan_list
+from fiat.planning.service import PlanService
+from fiat.planning.store import PlanStore
 from fiat.prompt import SYSTEM_PROMPT
 from fiat.provider_factory import ProviderFactory
 from fiat.providers import Provider
@@ -53,13 +65,48 @@ def _as_dict(item) -> dict:
     return item if isinstance(item, dict) else item.model_dump()
 
 class FiatCore:
-    def __init__(self, workspace_root: str | Path | None = None):
+    def __init__(
+        self,
+        workspace_root: str | Path | None = None,
+        permission_prompt: Callable[[PermissionRequest], PermissionDecision] | None = None,
+    ):
         self.provider: Provider | None = None
         self.todos: list[dict] = []
         self.workspace = WorkspaceManager(workspace_root or Path.cwd())
-        self.filesystem = FileSystemTools(self.workspace)
-        self.terminal = TerminalExecutor(self.workspace)
+        self.mode_controller = ModeController()
+        self.permissions = PermissionManager(
+            self.workspace, permission_prompt or self._prompt_for_permission
+        )
+        self.filesystem = FileSystemTools(
+            self.workspace, self.permissions.authorize_file_modification
+        )
+        self.terminal = TerminalExecutor(
+            self.workspace, authorization_callback=self._authorize_command
+        )
+        self.plan_store = PlanStore(self.workspace)
+        self.plans = PlanService(self.plan_store)
+        self.current_plan_id: str | None = None
+        self.revision_plan_id: str | None = None
         self.command_history: list[tuple[str, TerminalResult]] = []
+        self.conversation_history: list[tuple[str, str]] = []
+
+    @property
+    def mode(self) -> InteractionMode:
+        return self.mode_controller.mode
+
+    def set_mode(self, mode: InteractionMode | str) -> InteractionMode:
+        selected = self.mode_controller.set_mode(mode)
+        from fiat.state import session_state
+
+        session_state.interaction_mode = selected.value
+        return selected
+
+    def toggle_mode(self) -> InteractionMode:
+        selected = self.mode_controller.toggle()
+        from fiat.state import session_state
+
+        session_state.interaction_mode = selected.value
+        return selected
         
     def setup_provider(self, config: ProviderConfig, api_key: str):
         started_at = time.perf_counter()
@@ -112,10 +159,14 @@ class FiatCore:
 
     def edit_file(self, path: str, new_text: str, old_text: str = "", replace_all: bool = False) -> str:
         self._log_tool("edit_file", path)
+        if self.mode == InteractionMode.PLAN:
+            return "Plan Mode is read-only; file modification was not attempted."
         return self.filesystem.edit_file(path, new_text, old_text, replace_all)
 
     def multi_edit(self, path: str, edits: list[Edit]) -> str:
         self._log_tool("multi_edit", f"{path} ({len(edits)} edits)")
+        if self.mode == InteractionMode.PLAN:
+            return "Plan Mode is read-only; file modification was not attempted."
         return self.filesystem.multi_edit(path, edits)
 
     def glob_files(self, pattern: str, path: str = ".") -> str:
@@ -128,17 +179,50 @@ class FiatCore:
 
     def run_command(self, command: str, timeout_seconds: int = 60) -> str:
         self._log_tool("run_command", "request received")
-
-        def approve(request):
-            rendered = " ".join(request.args)
-            answer = input(f"\n  Approve command? [y/N]: {rendered}\n  > ").strip().lower()
-            return answer in ("y", "yes")
-
-        result = self.terminal.execute(command, timeout_seconds, approve)
+        if self.mode == InteractionMode.PLAN:
+            return "Plan Mode is read-only; command execution was not attempted."
+        result = self.terminal.execute(command, timeout_seconds)
         from fiat.state import session_state
 
         self.command_history.append((session_state.current_role, result))
         return result.format()
+
+    def _authorize_command(self, request) -> bool:
+        from fiat.state import session_state
+
+        role = session_state.current_role or "Fiat"
+        return self.permissions.authorize_command(
+            request, f"{role} requested command execution."
+        )
+
+    @staticmethod
+    def _prompt_for_permission(request: PermissionRequest) -> PermissionDecision:
+        command = " ".join(request.command) if request.command else "Not applicable"
+        resource = request.resource or "Not applicable"
+        print("\nALLOW SENSITIVE OPERATION?")
+        print(f"Operation: {request.category.value.replace('_', ' ').title()}")
+        print(f"Risk: {request.risk.value}")
+        print(f"Target: {resource}")
+        print(f"Working directory: {request.working_directory or 'Not applicable'}")
+        print(f"Command: {command}")
+        print(f"Reason: {request.reason}")
+        print("1. Yes, allow this time")
+        print("2. Always allow this exact operation in this session")
+        if request.can_persist_workspace_grant:
+            print("3. Always allow this exact operation for this workspace")
+        else:
+            print("3. Workspace permission unavailable for destructive operations")
+        print("4. No, deny this operation")
+        try:
+            choice = input("Select an option and press Enter: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return PermissionDecision.DENY
+        return {
+            "1": PermissionDecision.ALLOW_ONCE,
+            "2": PermissionDecision.ALLOW_SESSION,
+            "3": PermissionDecision.ALLOW_WORKSPACE,
+            "4": PermissionDecision.DENY,
+        }.get(choice, PermissionDecision.DENY)
 
     def todo_write(self, todos: list[Todo]) -> str:
         self.todos = [_as_dict(t) for t in todos]
@@ -152,10 +236,55 @@ class FiatCore:
     def chat(self, user_input: str):
         from fiat.agents.orchestrator import Orchestrator
         orchestrator = Orchestrator(self)
+        self.conversation_history.append(("user", user_input))
         try:
-            yield from orchestrator.run(user_input)
+            chunks: list[str] = []
+            for chunk in orchestrator.run(user_input):
+                chunks.append(chunk)
+                yield chunk
+            self.conversation_history.append(("assistant", "".join(chunks)))
         except Exception as e:
             yield f"\nError: {e}"
+
+    def generate_plan(self, user_request: str) -> Plan:
+        """Generate, validate, and persist a read-only structured plan."""
+        from fiat.agents.orchestrator import get_provider_for_agent
+
+        existing = None
+        if self.revision_plan_id:
+            existing = self.plan_store.load(self.revision_plan_id)
+            if existing.status != PlanLifecycle.REVISION:
+                raise ValueError("The selected plan is not awaiting revision.")
+        generator = StructuredPlanGenerator(
+            self.workspace,
+            get_provider_for_agent,
+            [self.read_file, self.list_files, self.glob_files, self.grep_search],
+        )
+        generated = generator.generate(user_request, existing)
+        plan = self.plans.prepare(generated, existing)
+        self.current_plan_id = plan.plan_id
+        self.revision_plan_id = None
+        self.conversation_history.append(("user", user_request))
+        self.conversation_history.append(("assistant", f"Generated plan {plan.plan_id}"))
+        return plan
+
+    def current_plan(self) -> Plan | None:
+        return self.plan_store.load(self.current_plan_id) if self.current_plan_id else None
+
+    def begin_plan_revision(self, plan_id: str) -> Plan:
+        plan = self.plans.begin_revision(plan_id)
+        self.current_plan_id = plan.plan_id
+        self.revision_plan_id = plan.plan_id
+        return plan
+
+    def plan_execution_status(self, plan_id: str) -> str:
+        plan = self.plan_store.load(plan_id)
+        if plan.status != PlanLifecycle.APPROVED:
+            return f"Plan {plan_id} is {plan.status.value}; only approved plans are Phase 3-ready."
+        return (
+            f"Plan {plan_id} is approved and has not been executed. "
+            "Structured plan execution is a Phase 3 capability and is not available yet."
+        )
 
 
 COMMANDS = [
@@ -174,6 +303,14 @@ COMMANDS = [
     {
         "name": "/context",
         "description": "Show interactive context and usage dashboard.",
+    },
+    {
+        "name": "/mode",
+        "description": "Show or switch between Plan Mode and Work Mode.",
+    },
+    {
+        "name": "/plan",
+        "description": "Show, manage, approve, or revise structured plans.",
     },
     {
         "name": "/index",
@@ -239,6 +376,68 @@ class CommandCompleter(Completer):
                         display_meta=cmd["description"]
                     )
 
+
+def _handle_mode_command(agent: FiatCore, arguments: str) -> str:
+    selected = arguments.strip().casefold()
+    if not selected:
+        return f"Current mode: {agent.mode.value}. Shift+Tab toggles modes."
+    if selected not in {"plan", "work"}:
+        return "Usage: /mode [plan|work]"
+    mode = agent.set_mode(selected)
+    return f"Switched to {mode.value} MODE."
+
+
+def _plan_approval_choice(plan: Plan) -> str:
+    print(render_plan(plan))
+    print("\n[A] Approve  [R] Revise  [D] Reject  [C] Cancel")
+    try:
+        return input("Choose a plan action, or press Enter to decide later: ").strip().casefold()
+    except (EOFError, KeyboardInterrupt):
+        return ""
+
+
+def _apply_plan_choice(agent: FiatCore, plan: Plan, choice: str) -> str:
+    if choice == "a":
+        return f"Plan approved for future Phase 3 use: {agent.plans.approve(plan.plan_id).plan_id}"
+    if choice == "r":
+        agent.begin_plan_revision(plan.plan_id)
+        return "Plan marked for revision. Switch to Plan Mode and enter the revision request."
+    if choice == "d":
+        return f"Plan rejected: {agent.plans.reject(plan.plan_id).plan_id}"
+    if choice == "c":
+        return f"Plan cancelled: {agent.plans.cancel(plan.plan_id).plan_id}"
+    return f"Plan awaits explicit approval: {plan.plan_id}"
+
+
+def _handle_plan_command(agent: FiatCore, arguments: str) -> str:
+    parts = arguments.split()
+    if not parts:
+        plan = agent.current_plan()
+        return render_plan(plan) if plan else "No current plan. Enter a request in Plan Mode."
+    action = parts[0].casefold()
+    if action == "list" and len(parts) == 1:
+        return render_plan_list(agent.plan_store.list())
+    if action == "show" and len(parts) == 2:
+        return render_plan(agent.plan_store.load(parts[1]))
+    if action == "approve" and len(parts) == 2:
+        plan = agent.plan_store.load(parts[1])
+        choice = _plan_approval_choice(plan)
+        if choice != "a":
+            return "Approval was not granted."
+        return _apply_plan_choice(agent, plan, choice)
+    if action == "reject" and len(parts) == 2:
+        return _apply_plan_choice(agent, agent.plan_store.load(parts[1]), "d")
+    if action == "revise" and len(parts) == 2:
+        return _apply_plan_choice(agent, agent.plan_store.load(parts[1]), "r")
+    if action == "cancel" and len(parts) == 2:
+        return _apply_plan_choice(agent, agent.plan_store.load(parts[1]), "c")
+    if action == "execute" and len(parts) == 2:
+        return agent.plan_execution_status(parts[1])
+    return (
+        "Usage: /plan [list|show <id>|approve <id>|reject <id>|revise <id>|"
+        "cancel <id>|execute <id>]"
+    )
+
 def run_first_time_setup() -> ProviderConfig:
     print("\nWelcome to Fiat. Let's set up your environment.\n")
     
@@ -299,7 +498,7 @@ def main():
         print(f"Please set {config.provider_name.upper()}_API_KEY or run setup again.")
         sys.exit(1)
 
-    agent = FiatCore()
+    agent = FiatCore(args.workspace)
     try:
         agent.setup_provider(config, api_key)
     except KeyboardInterrupt:
@@ -312,24 +511,27 @@ def main():
 
     mascot_path = Path(__file__).parent / "ascii-art.txt"
     if mascot_path.exists():
-        try:
-            sys.stdout.reconfigure(encoding='utf-8')
-        except AttributeError:
-            pass
+        reconfigure = getattr(sys.stdout, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8")
         print(mascot_path.read_text(encoding="utf-8"))
     else:
         print("Fiat AI Assistant")
 
     print("==================================================")
     print("Tools: read, list, edit, multi_edit, glob, grep, run_command, todo_write")
+    print("Modes: WORK MODE | Shift+Tab toggles Plan/Work | /mode plan | /mode work")
     print("Commands: Type /help to see available commands")
     print(f"Current Provider: {config.provider_name} | Model: {config.model_name}\n")
 
-    session = PromptSession(completer=CommandCompleter(COMMANDS))
+    session: PromptSession[str] = PromptSession(
+        completer=CommandCompleter(COMMANDS),
+        key_bindings=build_mode_key_bindings(agent.toggle_mode),
+    )
 
     while True:
         try:
-            user_input = session.prompt("You: ").strip()
+            user_input = session.prompt(lambda: agent.mode_controller.prompt).strip()
             if not user_input:
                 continue
                 
@@ -356,7 +558,19 @@ def main():
                 )
                 continue
 
-            if lower_input.startswith("/") and lower_input not in [c["name"] for c in COMMANDS]:
+            if command_name.casefold() == "/mode":
+                print(f"\n{_handle_mode_command(agent, command_arguments)}\n")
+                continue
+
+            if command_name.casefold() == "/plan":
+                try:
+                    print(f"\n{_handle_plan_command(agent, command_arguments)}\n")
+                except (OSError, ValueError, RuntimeError) as error:
+                    print(f"\nPlan error: {error}\n")
+                continue
+
+            known_commands = {command["name"] for command in COMMANDS}
+            if lower_input.startswith("/") and command_name.casefold() not in known_commands:
                 print(f"\nUnknown command: {lower_input}. Type /help for available commands.\n")
                 continue
 
@@ -433,13 +647,26 @@ def main():
                     save_config(config)
                     # Reconfigure provider
                     key = get_credential(config.provider_name)
-                    agent.setup_provider(config, key)
-                    from fiat.state import session_state, update_context_window
-                    session_state.model = config.model_name
-                    update_context_window(config.model_name)
-                    print(f"Model updated to {config.model_name}")
+                    if key:
+                        agent.setup_provider(config, key)
+                        from fiat.state import session_state, update_context_window
+
+                        session_state.model = config.model_name
+                        update_context_window(config.model_name)
+                        print(f"Model updated to {config.model_name}")
+                    else:
+                        print("Model was not changed because the provider credential is unavailable.")
                 else:
                     print("Model change cancelled or unchanged.")
+                continue
+
+            if agent.mode == InteractionMode.PLAN:
+                try:
+                    plan = agent.generate_plan(user_input)
+                    choice = _plan_approval_choice(plan)
+                    print(f"\n{_apply_plan_choice(agent, plan, choice)}\n")
+                except (OSError, ValueError, RuntimeError) as error:
+                    print(f"\nPlan generation failed: {error}\n")
                 continue
 
             print("\n Fiat: ", end="", flush=True)
