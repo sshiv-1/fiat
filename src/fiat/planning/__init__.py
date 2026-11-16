@@ -1,5 +1,10 @@
 """Structured planning contracts, validation, persistence, and rendering."""
 
+from fiat.planning.budget import (  # noqa: F401
+    ContextTier,
+    DEGRADATION_TIERS,
+    RequestBudgetEstimator,
+)
 from fiat.planning.models import (
     Plan,
     PlanLifecycle,
@@ -12,6 +17,8 @@ from fiat.planning.store import PlanStore
 from fiat.planning.validation import PlanValidationError, PlanValidator
 
 __all__ = [
+    "ContextTier",
+    "DEGRADATION_TIERS",
     "Plan",
     "PlanLifecycle",
     "PlanService",
@@ -19,6 +26,7 @@ __all__ = [
     "PlanTask",
     "PlanValidationError",
     "PlanValidator",
+    "RequestBudgetEstimator",
     "TaskLifecycle",
     "TaskType",
 ]

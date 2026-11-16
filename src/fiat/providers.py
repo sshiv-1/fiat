@@ -1,6 +1,14 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Generator
 
+from fiat.provider_errors import (  # noqa: F401
+    ProviderError,
+    ProviderPayloadTooLargeError,
+    ProviderRateLimitError,
+    RequestBudgetExceededError,
+    classify_provider_exception,
+)
+
 
 class Provider(ABC):
     @property
