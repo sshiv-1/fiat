@@ -280,11 +280,58 @@ class FiatCore:
     def plan_execution_status(self, plan_id: str) -> str:
         plan = self.plan_store.load(plan_id)
         if plan.status != PlanLifecycle.APPROVED:
-            return f"Plan {plan_id} is {plan.status.value}; only approved plans are Phase 3-ready."
+            return f"Plan {plan_id} is {plan.status.value}; only approved plans can be executed."
         return (
             f"Plan {plan_id} is approved and has not been executed. "
             "Structured plan execution is a Phase 3 capability and is not available yet."
         )
+
+    def execute_plan(self, plan_id: str, run_id: str | None = None) -> str:
+        """Execute or resume an approved plan via PlanExecutor."""
+        from fiat.execution.store import ExecutionStore
+        from fiat.execution.executor import PlanExecutor
+
+        exec_store = ExecutionStore(self.workspace.root)
+
+        def _task_runner(task_obj, run_id_arg: str) -> bool:
+            # Default runner: delegate task description to the agent chat
+            task_desc = getattr(task_obj, "description", str(task_obj))
+            chunks = list(self.chat(f"Execute this task: {task_desc}"))
+            return bool(chunks)
+
+        executor = PlanExecutor(
+            plan_store=self.plan_store,
+            execution_store=exec_store,
+            workspace_manager=self.workspace,
+            permission_manager=self.permissions,
+            task_runner=_task_runner,
+        )
+        try:
+            run = executor.execute_plan(plan_id, run_id=run_id)
+            return (
+                f"Execution {run.run_id} finished: {run.lifecycle.value}\n"
+                f"  Completed: {run.summary.completed_tasks}/{run.summary.total_tasks}  "
+                f"Failed: {run.summary.failed_tasks}  "
+                f"Blocked: {run.summary.blocked_tasks}"
+            )
+        except Exception as exc:
+            return f"Execution failed: {exc}"
+
+    def recover_plan_run(self, run_id: str) -> str:
+        """Recover a crashed or interrupted execution run."""
+        from fiat.execution.store import ExecutionStore
+        from fiat.execution.executor import PlanExecutor
+
+        exec_store = ExecutionStore(self.workspace.root)
+        executor = PlanExecutor(
+            plan_store=self.plan_store,
+            execution_store=exec_store,
+            workspace_manager=self.workspace,
+            permission_manager=self.permissions,
+            task_runner=lambda t, r: False,
+        )
+        run = executor.recover_run(run_id)
+        return f"Run {run.run_id} recovered: {run.lifecycle.value}"
 
 
 COMMANDS = [
@@ -431,8 +478,15 @@ def _handle_plan_command(agent: FiatCore, arguments: str) -> str:
         return _apply_plan_choice(agent, agent.plan_store.load(parts[1]), "r")
     if action == "cancel" and len(parts) == 2:
         return _apply_plan_choice(agent, agent.plan_store.load(parts[1]), "c")
-    if action == "execute" and len(parts) == 2:
-        return agent.plan_execution_status(parts[1])
+    if action == "execute" and len(parts) >= 2:
+        plan_id = parts[1]
+        # Support: /plan execute <id> --resume <run_id>
+        run_id = None
+        if "--resume" in parts:
+            resume_idx = parts.index("--resume")
+            if resume_idx + 1 < len(parts):
+                run_id = parts[resume_idx + 1]
+        return agent.execute_plan(plan_id, run_id=run_id)
     return (
         "Usage: /plan [list|show <id>|approve <id>|reject <id>|revise <id>|"
         "cancel <id>|execute <id>]"

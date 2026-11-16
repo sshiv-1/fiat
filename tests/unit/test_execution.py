@@ -113,3 +113,112 @@ def test_task_verifier_rejects_broken_python_syntax_and_nonzero_command_exit(tmp
 
     ev3 = TaskVerifier.verify_task(DummyTask(), tmp_path, command_runner=runner_pass, verification_commands=["pytest"])
     assert ev3.verified is True
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 tests
+# ---------------------------------------------------------------------------
+
+def _two_task_approved_plan() -> Plan:
+    """Plan with t1 -> t2 dependency chain, both APPROVED."""
+    t1 = PlanTask(
+        task_id="task_t1",
+        title="Implement alpha module",
+        description="Write the initial alpha module implementation with tests.",
+        target_files=["src/alpha.py"],
+        acceptance_criteria=["Module imports cleanly", "Unit tests pass"],
+    )
+    t2 = PlanTask(
+        task_id="task_t2",
+        title="Implement beta module",
+        description="Write the beta module that depends on the alpha module output.",
+        target_files=["src/beta.py"],
+        acceptance_criteria=["Module imports cleanly", "Integration tests pass"],
+        dependencies=["task_t1"],
+    )
+    return Plan(
+        title="Two-Task Chain Plan",
+        description="A two-task plan used to verify DAG scheduling and upstream-failure propagation.",
+        status=PlanLifecycle.APPROVED,
+        approved_at=datetime.now(UTC),
+        tasks=[t1, t2],
+    )
+
+
+def test_dag_scheduler_executes_in_topological_order_and_blocks_downstream_on_failure(tmp_path):
+    from fiat.execution.scheduler import PlanScheduler
+
+    plan = _two_task_approved_plan()
+    exec_store = ExecutionStore(tmp_path)
+    execution_order = PlanScheduler.get_execution_order(plan)
+
+    # t1 must precede t2
+    assert execution_order.index("task_t1") < execution_order.index("task_t2")
+
+    run = exec_store.create_run(plan, b"{}", execution_order=execution_order)
+
+    # Initial state: t1 QUEUED, t2 BLOCKED_BY_DEPENDENCY
+    assert run.task_states["task_t1"] == TaskExecutionState.QUEUED
+    assert run.task_states["task_t2"] == TaskExecutionState.BLOCKED_BY_DEPENDENCY
+
+    # Next runnable must be t1
+    assert PlanScheduler.next_runnable_task_id(run) == "task_t1"
+
+    # Simulate t1 failing
+    run.task_states["task_t1"] = TaskExecutionState.FAILED
+    run = PlanScheduler.refresh_task_readiness(plan, run)
+
+    # t2 must now be BLOCKED_UPSTREAM_FAILED
+    assert run.task_states["task_t2"] == TaskExecutionState.BLOCKED_UPSTREAM_FAILED
+
+    # No runnable task remains
+    assert PlanScheduler.next_runnable_task_id(run) is None
+
+    # Simulate a fresh run where t1 completes — t2 should become QUEUED
+    run2 = exec_store.create_run(plan, b"{}", execution_order=execution_order, run_id="run_fresh")
+    run2.task_states["task_t1"] = TaskExecutionState.COMPLETED
+    run2 = PlanScheduler.refresh_task_readiness(plan, run2)
+    assert run2.task_states["task_t2"] == TaskExecutionState.QUEUED
+    assert PlanScheduler.next_runnable_task_id(run2) == "task_t2"
+
+
+def test_crash_recovery_restores_interrupted_running_task_and_resumes_cleanly(tmp_path):
+    from fiat.execution.executor import PlanExecutor
+
+    plan = _approved_plan()
+    task_id = plan.tasks[0].task_id
+
+    exec_store = ExecutionStore(tmp_path)
+
+    # Seed a file that the task "owns"
+    owned = tmp_path / "src" / "feature.py"
+    owned.parent.mkdir(parents=True, exist_ok=True)
+    owned.write_text("# original\n", encoding="utf-8")
+
+    run = exec_store.create_run(plan, b"{}", execution_order=[task_id])
+    exec_store.snapshot_target_files(run.run_id, task_id, ["src/feature.py"])
+
+    # Simulate a crash: task was left RUNNING and the file was mutated
+    owned.write_text("# corrupted by crash\n", encoding="utf-8")
+    run.task_states[task_id] = TaskExecutionState.RUNNING
+    exec_store.save_run(run)
+
+    # Build a minimal executor (task_runner won't be called during recover_run)
+    executor = PlanExecutor(
+        plan_store=None,
+        execution_store=exec_store,
+        workspace_manager=None,
+        permission_manager=None,
+        task_runner=lambda t, r: True,
+    )
+
+    recovered_run = executor.recover_run(run.run_id)
+
+    # Task must be RECOVERED and file rolled back to original
+    assert recovered_run.task_states[task_id] == TaskExecutionState.RECOVERED
+    assert recovered_run.lifecycle == RunLifecycle.RECOVERED
+    assert owned.read_text(encoding="utf-8") == "# original\n"
+
+    # next_runnable should now surface the recovered task
+    from fiat.execution.scheduler import PlanScheduler
+    assert PlanScheduler.next_runnable_task_id(recovered_run) == task_id

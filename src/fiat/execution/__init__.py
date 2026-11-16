@@ -11,3 +11,5 @@ from fiat.execution.models import (
 )
 from fiat.execution.store import ExecutionStore
 from fiat.execution.verifier import TaskVerifier
+from fiat.execution.scheduler import PlanScheduler
+from fiat.execution.executor import PlanExecutor
