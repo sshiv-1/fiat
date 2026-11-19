@@ -84,8 +84,6 @@ For development you can run Fiat directly from the source tree:
 ```bash
 uv run python -m fiat
 ```
-The development launcher (`agent.py`) is still available for quick iteration.
-
 ---
 
 ## 💻 Running Fiat
