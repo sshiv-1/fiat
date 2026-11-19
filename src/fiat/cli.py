@@ -288,8 +288,8 @@ class FiatCore:
 
     def execute_plan(self, plan_id: str, run_id: str | None = None) -> str:
         """Execute or resume an approved plan via PlanExecutor."""
-        from fiat.execution.store import ExecutionStore
         from fiat.execution.executor import PlanExecutor
+        from fiat.execution.store import ExecutionStore
 
         exec_store = ExecutionStore(self.workspace.root)
 
@@ -319,8 +319,8 @@ class FiatCore:
 
     def recover_plan_run(self, run_id: str) -> str:
         """Recover a crashed or interrupted execution run."""
-        from fiat.execution.store import ExecutionStore
         from fiat.execution.executor import PlanExecutor
+        from fiat.execution.store import ExecutionStore
 
         exec_store = ExecutionStore(self.workspace.root)
         executor = PlanExecutor(
@@ -420,6 +420,7 @@ PROVIDER_MODELS = {
         "qwen/qwen2.5-72b-instruct",
     ],
 }
+PROVIDERS = tuple(PROVIDER_MODELS)
 
 class CommandCompleter(Completer):
     def __init__(self, commands):
@@ -509,7 +510,7 @@ def _handle_plan_command(agent: FiatCore, arguments: str) -> str:
 def run_first_time_setup() -> ProviderConfig:
     print("\nWelcome to Fiat. Let's set up your environment.\n")
     
-    providers = ["Gemini", "OpenAI", "Anthropic", "OpenRouter", "Groq"]
+    providers = list(PROVIDERS)
     provider_name = interactive_select("Choose provider:", providers)
     if not provider_name:
         provider_name = "Gemini"
@@ -655,7 +656,7 @@ def main():
                 
             if lower_input == "/provider":
                 print(f"\nCurrent provider: {config.provider_name}")
-                providers = ["Gemini", "OpenAI", "Anthropic", "OpenRouter", "Groq"]
+                providers = list(PROVIDERS)
                 new_provider = interactive_select("Choose provider:", providers)
                 
                 if new_provider and new_provider != config.provider_name:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from fiat.repository.symbol_index import ImportReference, SymbolIndex
 
@@ -76,7 +76,8 @@ class ImportGraph:
         return None
 
     def _python_candidates(self, reference: ImportReference) -> list[Path]:
-        source_parent = Path(reference.path).parent
+        source_path = PurePosixPath(reference.path.replace("\\", "/"))
+        source_parent = Path(*source_path.parts).parent
         if reference.level:
             base = source_parent
             for _ in range(reference.level - 1):
@@ -98,7 +99,8 @@ class ImportGraph:
     def _javascript_candidates(self, reference: ImportReference) -> list[Path]:
         if not reference.specifier.startswith("."):
             return []
-        base = Path(reference.path).parent / reference.specifier
+        source_path = PurePosixPath(reference.path.replace("\\", "/"))
+        base = Path(*source_path.parts).parent / reference.specifier
         candidates = [base]
         for extension in (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"):
             candidates.append(base.with_suffix(extension))

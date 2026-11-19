@@ -4,13 +4,12 @@ resolution, and error classification."""
 import os
 from unittest.mock import MagicMock, patch
 
-from fiat.provider_factory import ProviderFactory
 from fiat.config import get_credential
 from fiat.provider_errors import (
     ProviderPayloadTooLargeError,
     classify_provider_exception,
 )
-
+from fiat.provider_factory import ProviderFactory
 
 # ---------------------------------------------------------------------------
 # 1. Factory / registry resolution
@@ -28,6 +27,12 @@ def test_factory_resolves_nvidia_nim_with_correct_base_url():
     assert provider is not None
     assert provider.name == "NVIDIA_NIM"
     assert provider.base_url == "https://integrate.api.nvidia.com/v1"
+
+
+def test_factory_normalizes_provider_name_separators():
+    provider = ProviderFactory.create(" NVIDIA-NIM ", "You are a helpful assistant.")
+    assert provider is not None
+    assert provider.name == "NVIDIA_NIM"
 
 
 # ---------------------------------------------------------------------------

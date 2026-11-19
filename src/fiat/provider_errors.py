@@ -1,5 +1,6 @@
 import re
 
+
 class ProviderError(Exception):
     pass
 
@@ -27,16 +28,22 @@ def classify_provider_exception(exc: Exception) -> Exception:
     if isinstance(exc, (ProviderPayloadTooLargeError, ProviderRateLimitError, RequestBudgetExceededError)):
         return exc
     
-    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    raw_status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    try:
+        status = int(raw_status) if raw_status is not None else None
+    except (TypeError, ValueError):
+        status = None
     msg = str(exc).lower()
     
     is_413 = status == 413 or any(k in msg for k in ["payload too large", "request too large", "context_length_exceeded", "maximum context length", "tpm", "413"])
     if is_413:
         req, lim = None, None
         m_req = re.search(r"requested[:\s]*(\d+)", msg)
-        if m_req: req = int(m_req.group(1))
+        if m_req:
+            req = int(m_req.group(1))
         m_lim = re.search(r"limit[:\s]*(\d+)", msg)
-        if m_lim: lim = int(m_lim.group(1))
+        if m_lim:
+            lim = int(m_lim.group(1))
         return ProviderPayloadTooLargeError(str(exc), requested_tokens=req, limit_tokens=lim)
     
     if status == 429 or "rate limit" in msg:

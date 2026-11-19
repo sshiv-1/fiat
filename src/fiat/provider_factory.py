@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 class ProviderFactory:
     @staticmethod
     def create(provider_name: str, system_prompt: str) -> Provider | None:
-        name_lower = provider_name.lower()
+        name_lower = provider_name.strip().casefold().replace("-", "_").replace(" ", "_")
         if name_lower == "gemini":
             from fiat.provider_gemini import GeminiProvider
 

@@ -1,12 +1,20 @@
-import os
-import json
 import hashlib
-from pathlib import Path
+import json
+import os
 from datetime import datetime
-from typing import Callable, Any
+from pathlib import Path
+from typing import Any
+
+from fiat.execution.models import (
+    ExecutionRun,
+    ExecutionSummary,
+    RunLifecycle,
+    TaskCheckpoint,
+    TaskExecutionState,
+)
 from fiat.planning.models import PlanLifecycle
 from fiat.planning.validation import PlanValidator
-from fiat.execution.models import ExecutionRun, TaskCheckpoint, ExecutionSummary, RunLifecycle, TaskExecutionState
+
 
 class ExecutionStore:
     def __init__(self, workspace_root: Path):

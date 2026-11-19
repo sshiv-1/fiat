@@ -1,8 +1,8 @@
 """Structured planning contracts, validation, persistence, and rendering."""
 
 from fiat.planning.budget import (  # noqa: F401
-    ContextTier,
     DEGRADATION_TIERS,
+    ContextTier,
     RequestBudgetEstimator,
 )
 from fiat.planning.models import (

@@ -1,7 +1,9 @@
 from enum import Enum
+
 from pydantic import BaseModel, Field
 
-class TaskExecutionState(str, Enum):
+
+class TaskExecutionState(str, Enum):  # noqa: UP042
     QUEUED = "queued"
     BLOCKED_BY_DEPENDENCY = "blocked_by_dependency"
     BLOCKED_UPSTREAM_FAILED = "blocked_upstream_failed"
@@ -14,7 +16,8 @@ class TaskExecutionState(str, Enum):
     CANCELLED = "cancelled"
     RECOVERED = "recovered"
 
-class RunLifecycle(str, Enum):
+
+class RunLifecycle(str, Enum):  # noqa: UP042
     CREATED = "created"
     RUNNING = "running"
     PAUSED_PERMISSION = "paused_permission"
@@ -22,6 +25,7 @@ class RunLifecycle(str, Enum):
     FAILED = "failed"
     CANCELLED = "cancelled"
     RECOVERED = "recovered"
+
 
 class CommandVerificationResult(BaseModel):
     command: str
@@ -31,6 +35,7 @@ class CommandVerificationResult(BaseModel):
     duration_ms: int = 0
     passed: bool
 
+
 class FileVerificationResult(BaseModel):
     file_path: str
     exists: bool
@@ -39,11 +44,13 @@ class FileVerificationResult(BaseModel):
     error: str | None = None
     passed: bool
 
+
 class VerificationEvidence(BaseModel):
     verified: bool
     file_checks: list[FileVerificationResult] = Field(default_factory=list)
     command_checks: list[CommandVerificationResult] = Field(default_factory=list)
     failure_reason: str | None = None
+
 
 class TaskAttemptRecord(BaseModel):
     attempt_number: int
@@ -54,6 +61,7 @@ class TaskAttemptRecord(BaseModel):
     permission_audit_ids: list[str] = Field(default_factory=list)
     verification: VerificationEvidence | None = None
     error_message: str | None = None
+
 
 class TaskCheckpoint(BaseModel):
     run_id: str
@@ -67,6 +75,7 @@ class TaskCheckpoint(BaseModel):
     attempts: list[TaskAttemptRecord] = Field(default_factory=list)
     updated_at: str
 
+
 class ExecutionSummary(BaseModel):
     total_tasks: int
     completed_tasks: int = 0
@@ -74,6 +83,7 @@ class ExecutionSummary(BaseModel):
     blocked_tasks: int = 0
     cancelled_tasks: int = 0
     recovered_tasks: int = 0
+
 
 class ExecutionRun(BaseModel):
     run_id: str

@@ -1,16 +1,17 @@
+from collections.abc import Callable
 from datetime import datetime
-from pathlib import Path
-from typing import Callable, Any
-from fiat.planning.models import PlanLifecycle
+from typing import Any
+
 from fiat.execution.models import (
     ExecutionRun,
     RunLifecycle,
-    TaskExecutionState,
     TaskAttemptRecord,
+    TaskExecutionState,
 )
-from fiat.execution.store import ExecutionStore
 from fiat.execution.scheduler import PlanScheduler
+from fiat.execution.store import ExecutionStore
 from fiat.execution.verifier import TaskVerifier
+from fiat.planning.models import PlanLifecycle
 
 
 class PlanExecutor:

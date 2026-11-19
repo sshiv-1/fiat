@@ -1,8 +1,15 @@
 import ast
 import hashlib
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
-from fiat.execution.models import VerificationEvidence, FileVerificationResult, CommandVerificationResult
+from typing import Any
+
+from fiat.execution.models import (
+    CommandVerificationResult,
+    FileVerificationResult,
+    VerificationEvidence,
+)
+
 
 class TaskVerifier:
     @staticmethod

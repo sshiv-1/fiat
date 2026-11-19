@@ -1,6 +1,7 @@
-import json
 import csv
+import json
 from pathlib import Path
+
 
 def sample_notebook_content(raw_text: str, max_chars: int = 4000) -> tuple[str, dict]:
     try:
@@ -54,12 +55,12 @@ def sample_notebook_content(raw_text: str, max_chars: int = 4000) -> tuple[str, 
 def sample_tabular_content(file_path: Path, max_chars: int = 2000, max_scan_lines: int = 10000, sample_rows: int = 5) -> tuple[str, dict]:
     delimiter = "\t" if file_path.suffix.lower() == ".tsv" else ","
     headers = []
-    rows_data = []
+    rows_data: list[list[str]] = []
     row_count = 0
     row_count_capped = False
 
     try:
-        with open(file_path, "r", encoding="utf-8", errors="replace", newline="") as f:
+        with open(file_path, encoding="utf-8", errors="replace", newline="") as f:
             reader = csv.reader(f, delimiter=delimiter)
             try:
                 headers = [str(h)[:64] for h in next(reader)]
@@ -103,7 +104,9 @@ def sample_tabular_content(file_path: Path, max_chars: int = 2000, max_scan_line
             continue
         col_types.append("str")
 
-    cols_desc = ", ".join(f"{h} ({t})" for h, t in zip(headers, col_types))
+    cols_desc = ", ".join(
+        f"{h} ({t})" for h, t in zip(headers, col_types, strict=False)
+    )
     sample_lines = [f"{i+1}: {','.join(r)}" for i, r in enumerate(rows_data)]
     
     summary = f"[Tabular Summary: {row_count}{'+' if row_count_capped else ''} rows x {len(headers)} cols]\n"

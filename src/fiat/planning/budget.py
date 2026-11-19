@@ -1,6 +1,8 @@
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
+
 from fiat.provider_errors import RequestBudgetExceededError
+
 
 @dataclass(frozen=True)
 class ContextTier:

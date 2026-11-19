@@ -1,9 +1,15 @@
 from datetime import UTC, datetime
-from pathlib import Path
-from fiat.planning.models import Plan, PlanTask, PlanLifecycle
+
+from fiat.execution import (
+    CommandVerificationResult,
+    ExecutionStore,
+    RunLifecycle,
+    TaskExecutionState,
+    TaskVerifier,
+)
+from fiat.planning.models import Plan, PlanLifecycle, PlanTask
 from fiat.planning.store import PlanStore
 from fiat.tools.workspace import WorkspaceManager
-from fiat.execution import ExecutionStore, TaskVerifier, RunLifecycle, TaskExecutionState, CommandVerificationResult
 
 
 def _approved_plan(task_id: str = "task_t1") -> Plan:
@@ -51,7 +57,7 @@ def test_execution_store_rejects_unapproved_plan_and_keeps_plan_file_immutable(t
 
     try:
         exec_store.create_run(draft, plan_bytes)
-        assert False, "Expected ValueError for unapproved plan"
+        raise AssertionError("Expected ValueError for unapproved plan")
     except ValueError:
         pass
 
