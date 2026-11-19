@@ -88,6 +88,8 @@ def render_status_bar(
 class ActivitySpinner:
     """Threaded terminal activity indicator with a quiet non-TTY mode."""
 
+    _current_active: ActivitySpinner | None = None
+
     def __init__(
         self,
         label: str,
@@ -114,6 +116,9 @@ class ActivitySpinner:
         self._stream = sys.stdout
         self._started_at = time.monotonic()
         self._active = True
+        if ActivitySpinner._current_active is not None and ActivitySpinner._current_active is not self:
+            ActivitySpinner._current_active.pause()
+        ActivitySpinner._current_active = self
         if self._stream.isatty():
             self._thread = threading.Thread(
                 target=self._run,
@@ -150,6 +155,8 @@ class ActivitySpinner:
         with self._lock:
             label = self.label
             file_path = self.file_path
+        if ActivitySpinner._current_active is self:
+            ActivitySpinner._current_active = None
         if self._stream.isatty():
             self._clear_line()
             if emit_final:
@@ -162,14 +169,16 @@ class ActivitySpinner:
 
     def _run(self) -> None:
         frames = BRAILLE_FRAMES if _supports_utf8(self._stream) else ASCII_FRAMES
-        while not self._stop_event.wait(0.08):
+        while not self._stop_event.is_set():
             elapsed = time.monotonic() - self._started_at
             with self._lock:
                 frame = frames[self._frame_index % len(frames)]
                 self._frame_index += 1
                 message = self._format_message(frame, self.label, self.file_path, elapsed)
-            self._stream.write("\r" + _color(message, self.style, self._stream))
+            self._stream.write("\r" + _color(message, self.style, self._stream) + "\033[K")
             self._stream.flush()
+            if self._stop_event.wait(0.08):
+                break
 
     @staticmethod
     def _format_message(
@@ -182,11 +191,25 @@ class ActivitySpinner:
         return f"{prefix} {label}{target} ({elapsed:.1f}s)"
 
     def _clear_line(self) -> None:
-        self._stream.write("\r\033[2K")
+        self._stream.write("\r\033[2K\r")
 
     def pause(self) -> None:
         """Stop the animation without emitting a completion status."""
         self.stop(emit_final=False)
+
+
+_STATUS_PREFIXES = (
+    "[Orchestrator]",
+    "[Planner]",
+    "[Coder]",
+    "[Tester]",
+    "[Reviewer]",
+)
+
+
+def _is_status_chunk(text: str) -> bool:
+    stripped = text.strip()
+    return stripped.startswith(_STATUS_PREFIXES)
 
 
 class StreamPrinter:
@@ -210,21 +233,43 @@ class StreamPrinter:
     def write_chunk(self, text: str) -> None:
         if not text:
             return
+        stream = sys.stdout
+        stripped = text.strip()
+        if _is_status_chunk(text):
+            if stream.isatty():
+                if self._spinner is not None:
+                    emit = self._spinner.label != "Thinking..."
+                    self._spinner.stop(success=True, emit_final=emit)
+                self.start_thinking(stripped)
+                return
+            else:
+                if self._spinner is not None:
+                    self._spinner.stop(emit_final=False)
+                    self._spinner = None
+                stream.write(text)
+                stream.flush()
+                self._wrote_chunk = True
+                self._last_chunk = text
+                return
+
         if self._spinner is not None:
-            self._spinner.stop(emit_final=False)
+            emit = stream.isatty() and self._spinner.label != "Thinking..."
+            self._spinner.stop(success=True, emit_final=emit)
             self._spinner = None
-        sys.stdout.write(text)
-        sys.stdout.flush()
+        stream.write(text)
+        stream.flush()
         self._wrote_chunk = True
         self._last_chunk = text
 
     def finish(self) -> None:
+        stream = sys.stdout
         if self._spinner is not None:
-            self._spinner.stop(emit_final=False)
+            emit = stream.isatty() and self._spinner.label != "Thinking..."
+            self._spinner.stop(success=True, emit_final=emit)
             self._spinner = None
         if self._wrote_chunk and not self._last_chunk.endswith("\n"):
-            sys.stdout.write("\n")
-            sys.stdout.flush()
+            stream.write("\n")
+            stream.flush()
         self._wrote_chunk = False
         self._last_chunk = ""
 

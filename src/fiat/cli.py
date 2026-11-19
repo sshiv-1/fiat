@@ -9,6 +9,7 @@ import pwinput
 from dotenv import load_dotenv
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.formatted_text import ANSI
 from pydantic import BaseModel
 
 from fiat.config import (
@@ -641,6 +642,13 @@ def run_first_time_setup() -> ProviderConfig:
 
 
 def main():
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if callable(reconfigure):
+        try:
+            reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
     parser = argparse.ArgumentParser(description="AI Code Assistant (Fiat)")
     parser.add_argument("--api-key", help="Fallback API key if not configured")
     parser.add_argument("--workspace", default=".", help="Workspace for repository commands")
@@ -705,8 +713,10 @@ def main():
     while True:
         try:
             user_input = session.prompt(
-                lambda: f"{format_mode_badge(agent.mode.value)} "
-                f"{agent.mode_controller.prompt}"
+                lambda: ANSI(
+                    f"{format_mode_badge(agent.mode.value)} "
+                    f"{agent.mode_controller.prompt}"
+                )
             ).strip()
             if not user_input:
                 continue
@@ -865,7 +875,7 @@ def main():
                     print(f"\nPlan generation failed: {error}\n")
                 continue
 
-            print("\n Fiat: ", end="", flush=True)
+            print()
             stream_printer = StreamPrinter()
             stream_printer.start_thinking()
             try:

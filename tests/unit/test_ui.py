@@ -49,6 +49,52 @@ def test_stream_printer_stops_spinner_before_first_chunk(monkeypatch):
     assert output.getvalue() == "Hello world\n"
 
 
+def test_stream_printer_transitions_spinner_on_status_chunks(monkeypatch):
+    class FakeTTY(io.StringIO):
+        def isatty(self):
+            return True
+
+    fake_out = FakeTTY()
+    monkeypatch.setattr("sys.stdout", fake_out)
+
+    printer = StreamPrinter()
+    printer.start_thinking("Thinking...")
+    assert printer.spinner is not None
+    assert printer.spinner.label == "Thinking..."
+
+    # Receiving an orchestrator status starts a spinner for that stage
+    printer.write_chunk("[Orchestrator] Retrieving repository context...\n")
+    assert printer.spinner is not None
+    assert printer.spinner.label == "[Orchestrator] Retrieving repository context..."
+
+    # Transition to next stage stops previous with checkmark and starts next
+    printer.write_chunk("[Planner] Creating a validated plan...\n")
+    assert printer.spinner is not None
+    assert printer.spinner.label == "[Planner] Creating a validated plan..."
+    assert "[Orchestrator] Retrieving repository context..." in fake_out.getvalue()
+
+    # Receiving content stops the spinner
+    printer.write_chunk("Here is the answer.")
+    assert printer.spinner is None
+    assert "Here is the answer." in fake_out.getvalue()
+    printer.finish()
+
+
+def test_prompt_badge_ansi_formatting():
+    from prompt_toolkit.formatted_text import ANSI, to_formatted_text
+
+    badge = format_mode_badge("WORK")
+    formatted = to_formatted_text(ANSI(f"{badge} Work > "))
+    # FormattedText tokens must contain ansiyellow for the badge
+    styles = [style for style, _ in formatted]
+    assert any("ansiyellow" in s for s in styles)
+    # The rendered text must contain [WORK] and Work > without raw escape characters
+    full_text = "".join(text for _, text in formatted)
+    assert "[WORK] Work > " in full_text
+    assert "\x1b" not in full_text
+    assert "^[" not in full_text
+
+
 def test_stream_printer_consumes_generator_without_repr(monkeypatch):
     output = io.StringIO()
     monkeypatch.setattr("sys.stdout", output)
