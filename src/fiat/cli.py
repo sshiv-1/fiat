@@ -41,7 +41,14 @@ from fiat.tools import (
     TerminalResult,
     WorkspaceManager,
 )
-from fiat.ui import interactive_select
+from fiat.ui import (
+    ActivitySpinner,
+    StreamPrinter,
+    format_mode_badge,
+    interactive_select,
+    render_execution_event,
+    render_status_bar,
+)
 
 load_dotenv()
 
@@ -89,6 +96,7 @@ class FiatCore:
         self.revision_plan_id: str | None = None
         self.command_history: list[tuple[str, TerminalResult]] = []
         self.conversation_history: list[tuple[str, str]] = []
+        self._activity_spinner: ActivitySpinner | None = None
 
     @property
     def mode(self) -> InteractionMode:
@@ -149,39 +157,78 @@ class FiatCore:
         logging.info(f"{name}: {detail}")
         print(f"\n  [tool] {name} {detail}".rstrip(), flush=True)
 
+    def _start_activity(self, label: str, file_path: str | None = None) -> None:
+        if self._activity_spinner is not None:
+            self._activity_spinner.pause()
+        self._activity_spinner = ActivitySpinner(label, file_path)
+        self._activity_spinner.__enter__()
+
+    def _finish_activity(self, success: bool = True) -> None:
+        if self._activity_spinner is not None:
+            self._activity_spinner.stop(success=success)
+            self._activity_spinner = None
+
+    def _run_activity(self, label: str, file_path: str | None, operation):
+        self._start_activity(label, file_path)
+        try:
+            result = operation()
+        except Exception:
+            self._finish_activity(False)
+            raise
+        self._finish_activity()
+        return result
+
     def read_file(self, path: str) -> str:
         self._log_tool("read_file", path)
-        return self.filesystem.read_file(path)
+        return self._run_activity(
+            "Reading", path, lambda: self.filesystem.read_file(path)
+        )
 
     def list_files(self, path: str = ".") -> str:
         self._log_tool("list_files", path)
-        return self.filesystem.list_files(path)
+        return self._run_activity(
+            "Listing", path, lambda: self.filesystem.list_files(path)
+        )
 
     def edit_file(self, path: str, new_text: str, old_text: str = "", replace_all: bool = False) -> str:
         self._log_tool("edit_file", path)
         if self.mode == InteractionMode.PLAN:
             return "Plan Mode is read-only; file modification was not attempted."
-        return self.filesystem.edit_file(path, new_text, old_text, replace_all)
+        return self._run_activity(
+            "Editing",
+            path,
+            lambda: self.filesystem.edit_file(path, new_text, old_text, replace_all),
+        )
 
     def multi_edit(self, path: str, edits: list[Edit]) -> str:
         self._log_tool("multi_edit", f"{path} ({len(edits)} edits)")
         if self.mode == InteractionMode.PLAN:
             return "Plan Mode is read-only; file modification was not attempted."
-        return self.filesystem.multi_edit(path, edits)
+        return self._run_activity(
+            "Editing", path, lambda: self.filesystem.multi_edit(path, edits)
+        )
 
     def glob_files(self, pattern: str, path: str = ".") -> str:
         self._log_tool("glob_files", f"{pattern} in {path}")
-        return self.filesystem.glob_files(pattern, path)
+        return self._run_activity(
+            "Searching", path, lambda: self.filesystem.glob_files(pattern, path)
+        )
 
     def grep_search(self, pattern: str, path: str = ".", file_glob: str = "*", ignore_case: bool = False) -> str:
         self._log_tool("grep_search", f"{pattern!r} in {path}")
-        return self.filesystem.grep_search(pattern, path, file_glob, ignore_case)
+        return self._run_activity(
+            "Searching",
+            path,
+            lambda: self.filesystem.grep_search(pattern, path, file_glob, ignore_case),
+        )
 
     def run_command(self, command: str, timeout_seconds: int = 60) -> str:
         self._log_tool("run_command", "request received")
         if self.mode == InteractionMode.PLAN:
             return "Plan Mode is read-only; command execution was not attempted."
-        result = self.terminal.execute(command, timeout_seconds)
+        result = self._run_activity(
+            "Running", command, lambda: self.terminal.execute(command, timeout_seconds)
+        )
         from fiat.state import session_state
 
         self.command_history.append((session_state.current_role, result))
@@ -190,10 +237,16 @@ class FiatCore:
     def _authorize_command(self, request) -> bool:
         from fiat.state import session_state
 
+        if self._activity_spinner is not None:
+            self._activity_spinner.pause()
+            self._activity_spinner = None
         role = session_state.current_role or "Fiat"
-        return self.permissions.authorize_command(
+        approved = self.permissions.authorize_command(
             request, f"{role} requested command execution."
         )
+        if approved:
+            self._start_activity("Running", " ".join(request.args))
+        return approved
 
     @staticmethod
     def _prompt_for_permission(request: PermissionRequest) -> PermissionDecision:
@@ -299,12 +352,29 @@ class FiatCore:
             chunks = list(self.chat(f"Execute this task: {task_desc}"))
             return bool(chunks)
 
+        active_task_spinner: ActivitySpinner | None = None
+
+        def _on_progress(task_id, state, target_files, detail):
+            nonlocal active_task_spinner
+            if active_task_spinner is not None:
+                active_task_spinner.pause()
+                active_task_spinner = None
+            render_execution_event(task_id, state.value, target_files, detail)
+            if state.value == "RUNNING":
+                active_task_spinner = ActivitySpinner(
+                    f"[EXEC] {task_id}: Executing",
+                    target_files[0] if target_files else None,
+                    style="green",
+                )
+                active_task_spinner.__enter__()
+
         executor = PlanExecutor(
             plan_store=self.plan_store,
             execution_store=exec_store,
             workspace_manager=self.workspace,
             permission_manager=self.permissions,
             task_runner=_task_runner,
+            on_progress=_on_progress,
         )
         try:
             run = executor.execute_plan(plan_id, run_id=run_id)
@@ -316,6 +386,9 @@ class FiatCore:
             )
         except Exception as exc:
             return f"Execution failed: {exc}"
+        finally:
+            if active_task_spinner is not None:
+                active_task_spinner.pause()
 
     def recover_plan_run(self, run_id: str) -> str:
         """Recover a crashed or interrupted execution run."""
@@ -455,12 +528,26 @@ class CommandCompleter(Completer):
                     )
 
 
+def _complete_command_name(user_input: str) -> str:
+    """Expand a unique slash-command prefix before dispatching it."""
+    command_name, separator, arguments = user_input.partition(" ")
+    if not command_name.startswith("/"):
+        return user_input
+    names = [command["name"] for command in COMMANDS]
+    matches = [
+        name for name in names if name.casefold().startswith(command_name.casefold())
+    ]
+    if len(matches) != 1 or command_name.casefold() == matches[0].casefold():
+        return user_input
+    return matches[0] + (separator + arguments if separator else "")
+
+
 def _handle_mode_command(agent: FiatCore, arguments: str) -> str:
     selected = arguments.strip().casefold()
     if not selected:
         return f"Current mode: {agent.mode.value}. Shift+Tab toggles modes."
-    if selected not in {"plan", "work"}:
-        return "Usage: /mode [plan|work]"
+    if selected not in {"chat", "plan", "work"}:
+        return "Usage: /mode [chat|plan|work]"
     mode = agent.set_mode(selected)
     return f"Switched to {mode.value} MODE."
 
@@ -605,9 +692,10 @@ def main():
 
     print("==================================================")
     print("Tools: read, list, edit, multi_edit, glob, grep, run_command, todo_write")
-    print("Modes: WORK MODE | Shift+Tab toggles Plan/Work | /mode plan | /mode work")
+    print("Modes: CHAT | PLAN | WORK | Shift+Tab toggles Plan/Work")
     print("Commands: Type /help to see available commands")
     print(f"Current Provider: {config.provider_name} | Model: {config.model_name}\n")
+    print(render_status_bar(agent.mode.value, config.model_name, str(agent.workspace.root)))
 
     session: PromptSession[str] = PromptSession(
         completer=CommandCompleter(COMMANDS),
@@ -616,10 +704,13 @@ def main():
 
     while True:
         try:
-            user_input = session.prompt(lambda: agent.mode_controller.prompt).strip()
+            user_input = session.prompt(
+                lambda: f"{format_mode_badge(agent.mode.value)} "
+                f"{agent.mode_controller.prompt}"
+            ).strip()
             if not user_input:
                 continue
-                
+            user_input = _complete_command_name(user_input)
             lower_input = user_input.lower()
             command_name, _, command_arguments = user_input.partition(" ")
             repository_commands = {"/index", "/map", "/search", "/symbol"}
@@ -644,7 +735,15 @@ def main():
                 continue
 
             if command_name.casefold() == "/mode":
-                print(f"\n{_handle_mode_command(agent, command_arguments)}\n")
+                print(f"\n{_handle_mode_command(agent, command_arguments)}")
+                print(
+                    render_status_bar(
+                        agent.mode.value,
+                        config.model_name,
+                        str(agent.workspace.root),
+                    )
+                )
+                print()
                 continue
 
             if command_name.casefold() == "/plan":
@@ -693,6 +792,13 @@ def main():
                     session_state.model = config.model_name
                     update_context_window(config.model_name)
                     print(f"Provider switched to {new_provider} (Model: {config.model_name})")
+                    print(
+                        render_status_bar(
+                            agent.mode.value,
+                            config.model_name,
+                            str(agent.workspace.root),
+                        )
+                    )
                 continue
 
             if lower_input == "/auth":
@@ -736,6 +842,13 @@ def main():
                         session_state.model = config.model_name
                         update_context_window(config.model_name)
                         print(f"Model updated to {config.model_name}")
+                        print(
+                            render_status_bar(
+                                agent.mode.value,
+                                config.model_name,
+                                str(agent.workspace.root),
+                            )
+                        )
                     else:
                         print("Model was not changed because the provider credential is unavailable.")
                 else:
@@ -744,7 +857,8 @@ def main():
 
             if agent.mode == InteractionMode.PLAN:
                 try:
-                    plan = agent.generate_plan(user_input)
+                    with ActivitySpinner("Generating plan..."):
+                        plan = agent.generate_plan(user_input)
                     choice = _plan_approval_choice(plan)
                     print(f"\n{_apply_plan_choice(agent, plan, choice)}\n")
                 except (OSError, ValueError, RuntimeError) as error:
@@ -752,9 +866,13 @@ def main():
                 continue
 
             print("\n Fiat: ", end="", flush=True)
-            for chunk in agent.chat(user_input):
-                print(chunk, end="", flush=True)
-            print("\n")
+            stream_printer = StreamPrinter()
+            stream_printer.start_thinking()
+            try:
+                for chunk in agent.chat(user_input):
+                    stream_printer.write_chunk(chunk)
+            finally:
+                stream_printer.finish()
         except KeyboardInterrupt:
             print("\n\nGoodbye!")
             break

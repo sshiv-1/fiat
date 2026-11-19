@@ -9,6 +9,7 @@ from prompt_toolkit.key_binding import KeyBindings
 
 
 class InteractionMode(StrEnum):
+    CHAT = "CHAT"
     PLAN = "PLAN"
     WORK = "WORK"
 
@@ -28,7 +29,11 @@ class ModeController:
 
     @property
     def prompt(self) -> str:
-        return "Plan > " if self._mode == InteractionMode.PLAN else "Work > "
+        return {
+            InteractionMode.CHAT: "Chat > ",
+            InteractionMode.PLAN: "Plan > ",
+            InteractionMode.WORK: "Work > ",
+        }[self._mode]
 
     def set_mode(self, mode: InteractionMode | str) -> InteractionMode:
         self._mode = InteractionMode(str(mode).upper())

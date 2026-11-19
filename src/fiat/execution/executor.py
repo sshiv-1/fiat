@@ -23,6 +23,10 @@ class PlanExecutor:
         permission_manager: Any,
         task_runner: Callable[[Any, str], bool],
         verifier: TaskVerifier | None = None,
+        on_progress: Callable[
+            [str, TaskExecutionState, list[str], str | None], None
+        ]
+        | None = None,
     ):
         self.plan_store = plan_store
         self.execution_store = execution_store
@@ -30,6 +34,17 @@ class PlanExecutor:
         self.permission_manager = permission_manager
         self.task_runner = task_runner
         self.verifier = verifier or TaskVerifier()
+        self.on_progress = on_progress
+
+    def _notify_progress(
+        self,
+        task_id: str,
+        state: TaskExecutionState,
+        target_files: list[str],
+        detail: str | None = None,
+    ) -> None:
+        if self.on_progress is not None:
+            self.on_progress(task_id, state, target_files, detail)
 
     def _load_plan_with_bytes(self, plan_id: str) -> tuple[Any, bytes]:
         """Load a plan and return it together with its raw bytes for SHA256 binding."""
@@ -80,6 +95,7 @@ class PlanExecutor:
                 self.execution_store.snapshot_target_files(run.run_id, tid, target_files)
 
                 run.task_states[tid] = TaskExecutionState.RUNNING
+                self._notify_progress(tid, TaskExecutionState.RUNNING, target_files)
                 run.updated_at = datetime.utcnow().isoformat()
                 run.summary = self.execution_store.recompute_summary(run.task_states)
                 self.execution_store.save_run(run)
@@ -101,6 +117,9 @@ class PlanExecutor:
                 evidence = None
                 if success:
                     run.task_states[tid] = TaskExecutionState.VERIFYING
+                    self._notify_progress(
+                        tid, TaskExecutionState.VERIFYING, target_files
+                    )
                     ckpt.state = TaskExecutionState.VERIFYING
                     self.execution_store.save_checkpoint(ckpt)
 
@@ -126,15 +145,27 @@ class PlanExecutor:
 
                 if success:
                     run.task_states[tid] = TaskExecutionState.COMPLETED
+                    self._notify_progress(
+                        tid, TaskExecutionState.COMPLETED, target_files, "verified"
+                    )
                     ckpt.state = TaskExecutionState.COMPLETED
                     ckpt.post_task_file_hashes = {rel: None for rel in target_files}
                 else:
                     self.execution_store.restore_target_files(run.run_id, tid)
                     if attempt_num > ckpt.max_retries:
                         run.task_states[tid] = TaskExecutionState.FAILED
+                        self._notify_progress(
+                            tid,
+                            TaskExecutionState.FAILED,
+                            target_files,
+                            err_msg or "verification failed",
+                        )
                         ckpt.state = TaskExecutionState.FAILED
                     else:
                         run.task_states[tid] = TaskExecutionState.RETRYING
+                        self._notify_progress(
+                            tid, TaskExecutionState.RETRYING, target_files, err_msg
+                        )
                         ckpt.state = TaskExecutionState.RETRYING
 
                 ckpt.updated_at = end_time
