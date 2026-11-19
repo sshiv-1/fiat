@@ -404,7 +404,21 @@ PROVIDER_MODELS = {
         "deepseek-r1-distill-llama-70b",
         "qwen/qwen3.8-27b",
         "openai/gpt-oss-safeguard-20b"
-    ]
+    ],
+    "HuggingFace": [
+        "Qwen/Qwen2.5-72B-Instruct",
+        "meta-llama/Llama-3.3-70B-Instruct",
+        "mistralai/Mistral-Small-24B-Instruct-2501",
+        "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+        "NousResearch/Hermes-3-Llama-3.1-8B",
+    ],
+    "NVIDIA_NIM": [
+        "meta/llama-3.3-70b-instruct",
+        "nvidia/llama-3.1-nemotron-70b-instruct",
+        "mistralai/mistral-small-24b-instruct-2501",
+        "deepseek-ai/deepseek-r1",
+        "qwen/qwen2.5-72b-instruct",
+    ],
 }
 
 class CommandCompleter(Completer):

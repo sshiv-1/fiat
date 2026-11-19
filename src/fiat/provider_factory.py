@@ -38,4 +38,20 @@ class ProviderFactory:
                 base_url="https://api.groq.com/openai/v1",
                 provider_name="Groq"
             )
+        elif name_lower == "huggingface":
+            from fiat.provider_openai import OpenAIProvider
+
+            return OpenAIProvider(
+                system_prompt=system_prompt,
+                base_url="https://router.huggingface.co/v1",
+                provider_name="HuggingFace",
+            )
+        elif name_lower == "nvidia_nim":
+            from fiat.provider_openai import OpenAIProvider
+
+            return OpenAIProvider(
+                system_prompt=system_prompt,
+                base_url="https://integrate.api.nvidia.com/v1",
+                provider_name="NVIDIA_NIM",
+            )
         return None
