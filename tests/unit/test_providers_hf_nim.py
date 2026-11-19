@@ -132,3 +132,74 @@ def test_classify_passthrough_for_unknown_error():
     classified = classify_provider_exception(exc)
     assert classified is exc
     assert not isinstance(classified, ProviderPayloadTooLargeError)
+
+
+
+# ---------------------------------------------------------------------------
+# 4. Custom / org-prefixed model IDs
+# ---------------------------------------------------------------------------
+
+def test_huggingface_accepts_arbitrary_org_slash_model_id():
+    """Provider.configure must accept model IDs like 'moonshotai/kimi-k3.1-pro'."""
+    provider = ProviderFactory.create("huggingface", "system")
+    with patch("fiat.provider_openai.OpenAI") as MockOpenAI:
+        mock_client = MagicMock()
+        MockOpenAI.return_value = mock_client
+        provider.configure(model="moonshotai/kimi-k3.1-pro", api_key="hf-test")
+    assert provider.model == "moonshotai/kimi-k3.1-pro"
+
+    # The model string is forwarded verbatim to the API call
+    mock_chunk = MagicMock()
+    mock_chunk.usage = None
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "ok"
+    mock_chunk.choices[0].delta.tool_calls = None
+    mock_client.chat.completions.create.return_value = iter([mock_chunk])
+
+    list(provider.stream("test"))
+    call_kwargs = mock_client.chat.completions.create.call_args
+    assert call_kwargs[1]["model"] == "moonshotai/kimi-k3.1-pro"
+
+
+def test_nvidia_nim_accepts_arbitrary_org_slash_model_id():
+    provider = ProviderFactory.create("nvidia_nim", "system")
+    with patch("fiat.provider_openai.OpenAI") as MockOpenAI:
+        mock_client = MagicMock()
+        MockOpenAI.return_value = mock_client
+        provider.configure(model="nvidia/llama-3.1-nemotron-ultra-253b-v1", api_key="nvapi-test")
+    assert provider.model == "nvidia/llama-3.1-nemotron-ultra-253b-v1"
+
+
+def test_config_round_trips_model_with_slashes(tmp_path):
+    """save_config / load_config must preserve org/model style names."""
+    from fiat.config import ProviderConfig, AuthConfig, save_config, load_config, CONFIG_FILE
+    original_config_file = CONFIG_FILE
+
+    # Temporarily redirect CONFIG_FILE to tmp_path
+    import fiat.config as cfg_mod
+    test_config_file = tmp_path / "config.json"
+    cfg_mod.CONFIG_FILE = test_config_file
+    cfg_mod.CONFIG_DIR = tmp_path
+    try:
+        pc = ProviderConfig(
+            provider_name="HuggingFace",
+            model_name="moonshotai/kimi-k3.1-pro",
+            auth=AuthConfig(method="api_key"),
+        )
+        save_config(pc)
+        loaded = load_config()
+        assert loaded is not None
+        assert loaded.model_name == "moonshotai/kimi-k3.1-pro"
+        assert loaded.provider_name == "HuggingFace"
+    finally:
+        cfg_mod.CONFIG_FILE = original_config_file
+        cfg_mod.CONFIG_DIR = original_config_file.parent
+
+
+def test_select_model_custom_option_exists():
+    """The _CUSTOM_MODEL_CHOICE sentinel is importable and truthy."""
+    from fiat.cli import _CUSTOM_MODEL_CHOICE, PROVIDER_MODELS
+    assert _CUSTOM_MODEL_CHOICE  # non-empty string
+    # Every provider's preset list should NOT already contain the sentinel
+    for models in PROVIDER_MODELS.values():
+        assert _CUSTOM_MODEL_CHOICE not in models

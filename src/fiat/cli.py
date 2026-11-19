@@ -422,6 +422,22 @@ PROVIDER_MODELS = {
 }
 PROVIDERS = tuple(PROVIDER_MODELS)
 
+_CUSTOM_MODEL_CHOICE = "✎ Enter a custom model ID..."
+
+
+def _select_model(provider_name: str) -> str | None:
+    """Let the user pick a model from the preset list or type a custom one."""
+    model_list = list(PROVIDER_MODELS.get(provider_name, ["default-model"]))
+    model_list.append(_CUSTOM_MODEL_CHOICE)
+    selection = interactive_select("Choose model:", model_list)
+    if selection == _CUSTOM_MODEL_CHOICE:
+        try:
+            custom = input("Model ID (e.g. org/model-name): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return None
+        return custom or None
+    return selection
+
 class CommandCompleter(Completer):
     def __init__(self, commands):
         self.commands = commands
@@ -521,9 +537,9 @@ def run_first_time_setup() -> ProviderConfig:
     api_key = pwinput.pwinput(f"\nEnter API key for {provider_name}: ").strip()
     save_credential(provider_name, api_key)
     
-    model_list = PROVIDER_MODELS.get(provider_name, ["default-model"])
-    model_name = interactive_select("Choose model:", model_list)
+    model_name = _select_model(provider_name)
     if not model_name:
+        model_list = PROVIDER_MODELS.get(provider_name, ["default-model"])
         model_name = model_list[0]
         print(f"Defaulting to {model_name}")
     
@@ -667,9 +683,9 @@ def main():
                         save_credential(new_provider, new_key)
                     
                     config.provider_name = new_provider
-                    # Default model for new provider
-                    model_list = PROVIDER_MODELS.get(new_provider, ["default-model"])
-                    config.model_name = model_list[0]
+                    # Pick model for new provider (supports custom IDs)
+                    picked_model = _select_model(new_provider)
+                    config.model_name = picked_model or PROVIDER_MODELS.get(new_provider, ["default-model"])[0]
                     save_config(config)
                     agent.setup_provider(config, new_key)
                     from fiat.state import session_state, update_context_window
@@ -705,11 +721,8 @@ def main():
                 
             if lower_input == "/model":
                 print(f"\nCurrent model: {config.model_name}")
-                model_list = PROVIDER_MODELS.get(config.provider_name, ["default-model"])
                 
-                # If they want to manually type a model not in the list, we can fallback to typing if questionary is aborted or we can just offer typing as a standard.
-                # The user requested: "Esc from model selection preserves the existing model."
-                new_model = interactive_select("Choose model:", model_list)
+                new_model = _select_model(config.provider_name)
                 
                 if new_model and new_model != config.model_name:
                     config.model_name = new_model
