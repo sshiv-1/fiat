@@ -4,7 +4,14 @@ resolution, and error classification."""
 import os
 from unittest.mock import MagicMock, patch
 
-from fiat.config import get_credential
+import fiat.config as cfg_mod
+from fiat.config import (
+    AuthConfig,
+    ProviderConfig,
+    get_credential,
+    load_config,
+    save_config,
+)
 from fiat.provider_errors import (
     ProviderPayloadTooLargeError,
     classify_provider_exception,
@@ -170,30 +177,21 @@ def test_nvidia_nim_accepts_arbitrary_org_slash_model_id():
     assert provider.model == "nvidia/llama-3.1-nemotron-ultra-253b-v1"
 
 
-def test_config_round_trips_model_with_slashes(tmp_path):
+def test_config_round_trips_model_with_slashes(tmp_path, monkeypatch):
     """save_config / load_config must preserve org/model style names."""
-    from fiat.config import ProviderConfig, AuthConfig, save_config, load_config, CONFIG_FILE
-    original_config_file = CONFIG_FILE
+    monkeypatch.setattr(cfg_mod, "CONFIG_DIR", tmp_path / ".fiat")
+    monkeypatch.setattr(cfg_mod, "CONFIG_FILE", tmp_path / ".fiat" / "config.json")
 
-    # Temporarily redirect CONFIG_FILE to tmp_path
-    import fiat.config as cfg_mod
-    test_config_file = tmp_path / "config.json"
-    cfg_mod.CONFIG_FILE = test_config_file
-    cfg_mod.CONFIG_DIR = tmp_path
-    try:
-        pc = ProviderConfig(
-            provider_name="HuggingFace",
-            model_name="moonshotai/kimi-k3.1-pro",
-            auth=AuthConfig(method="api_key"),
-        )
-        save_config(pc)
-        loaded = load_config()
-        assert loaded is not None
-        assert loaded.model_name == "moonshotai/kimi-k3.1-pro"
-        assert loaded.provider_name == "HuggingFace"
-    finally:
-        cfg_mod.CONFIG_FILE = original_config_file
-        cfg_mod.CONFIG_DIR = original_config_file.parent
+    pc = ProviderConfig(
+        provider_name="HuggingFace",
+        model_name="moonshotai/kimi-k3.1-pro",
+        auth=AuthConfig(method="api_key"),
+    )
+    save_config(pc)
+    loaded = load_config()
+    assert loaded is not None
+    assert loaded.model_name == "moonshotai/kimi-k3.1-pro"
+    assert loaded.provider_name == "HuggingFace"
 
 
 def test_select_model_custom_option_exists():

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import csv
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 
 @dataclass
@@ -23,7 +23,7 @@ def parse_split_members(raw_members: str, payer: str) -> list[str]:
 
 def load_expenses(csv_path: Path) -> list[ExpenseEntry]:
     entries: list[ExpenseEntry] = []
-    with open(csv_path, "r", encoding="utf-8", newline="") as handle:
+    with open(csv_path, encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
         for row in reader:
             payer = (row.get("payer") or "").strip()
